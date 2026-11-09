@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# simorgh-update — update Simorgh itself.
+# Pulls the latest Simorgh from its git clone and re-runs install.sh
+# (non-interactively: the saved locale is reused).
+# The clone is found in this order:
+#   1. $SIMORGH_REPO
+#   2. ~/simorgh
+#   3. the path recorded at install time in ~/.local/share/simorgh/repo-path
+set -euo pipefail
+
+SHARE_DIR="$HOME/.local/share/simorgh"
+
+find_repo() {
+  if [[ -n "${SIMORGH_REPO:-}" && -d "$SIMORGH_REPO/.git" ]]; then
+    echo "$SIMORGH_REPO"
+    return 0
+  fi
+  if [[ -d "$HOME/simorgh/.git" ]]; then
+    echo "$HOME/simorgh"
+    return 0
+  fi
+  if [[ -f "$SHARE_DIR/repo-path" ]]; then
+    local p
+    p="$(cat "$SHARE_DIR/repo-path")"
+    if [[ -d "$p/.git" ]]; then
+      echo "$p"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+REPO="$(find_repo)" || {
+  echo "simorgh-update: no Simorgh git clone found." >&2
+  echo "Clone it first: git clone https://github.com/mmdos32/simorgh ~/simorgh" >&2
+  exit 1
+}
+
+echo "Updating Simorgh from $REPO ..."
+git -C "$REPO" pull --ff-only || {
+  echo "simorgh-update: pull failed (local changes in $REPO?)." >&2
+  echo "Check with: git -C $REPO status" >&2
+  exit 1
+}
+exec "$REPO/install.sh"

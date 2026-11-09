@@ -1,0 +1,12 @@
+{
+    // Simorgh — VS Code defaults (installed only if you have no settings yet)
+    "editor.fontFamily": "'JetBrainsMono Nerd Font', monospace",
+    "editor.fontSize": 14,
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true,
+    "editor.wordWrap": "on",
+    "workbench.colorTheme": "Default Dark Modern",
+    "terminal.integrated.fontFamily": "'JetBrainsMono Nerd Font', monospace",
+    "files.autoSave": "afterDelay",
+    "files.trimTrailingWhitespace": true
+}

@@ -1,0 +1,411 @@
+#!/usr/bin/env bash
+# simorgh-menu — the Simorgh app menu (Rofi).
+# Install alternative browsers / terminals / editors, gaming tools,
+# switch themes, or update the system — all with yay.
+set -euo pipefail
+
+TERMINAL="${SIMORGH_TERMINAL:-kitty}"
+
+run_in_terminal() {
+  # run_in_terminal <package...> — install in a visible terminal window
+  local pkgs=("$@")
+  # Docker needs group + service setup after the package install, or
+  # every docker command fails with permission denied.
+  local docker_setup=""
+  if [[ " ${pkgs[*]} " == *" docker "* ]]; then
+    docker_setup="; echo; echo 'Setting up Docker (group + service)...'; sudo usermod -aG docker \"\$USER\" && sudo systemctl enable --now docker && echo 'Docker ready — log out and back in for the group to take effect.'"
+  fi
+  if command -v "$TERMINAL" >/dev/null; then
+    "$TERMINAL" -e bash -c "yay -S --noconfirm --needed ${pkgs[*]}$docker_setup; echo; read -n1 -s -r -p 'Done. Press any key to close.'" &
+  else
+    yay -S --noconfirm --needed "${pkgs[@]}"
+    if [[ -n "$docker_setup" ]]; then
+      sudo usermod -aG docker "$USER" && sudo systemctl enable --now docker
+      notify "Docker ready — log out and back in for the group to take effect."
+    fi
+  fi
+}
+
+notify() {
+  command -v notify-send >/dev/null && notify-send "Simorgh" "$*" 2>/dev/null || true
+}
+
+rofi_menu() { # rofi_menu <prompt> <options...>
+  local prompt="$1"; shift
+  printf '%s\n' "$@" | rofi -dmenu -p "$prompt" -i
+}
+
+pick_and_install() { # pick_and_install <prompt> <"Label|pkg ..." ...>
+  # Generic one-level picker: each item is "Label|package names".
+  # A package value of "-" means the item is already installed / a no-op.
+  local prompt="$1"; shift
+  local labels=() pkgs=() item label pkg
+  for item in "$@"; do
+    label="${item%%|*}"; pkg="${item##*|}"
+    labels+=("$label"); pkgs+=("$pkg")
+  done
+  local choice
+  choice="$(rofi_menu "$prompt" "${labels[@]}")" || return 0
+  local i
+  for i in "${!labels[@]}"; do
+    if [[ "${labels[$i]}" == "$choice" ]]; then
+      pkg="${pkgs[$i]}"
+      [[ "$pkg" == "-" ]] && return 0
+      # shellcheck disable=SC2086
+      run_in_terminal $pkg
+      notify "Installing $choice..."
+      return 0
+    fi
+  done
+}
+
+install_maia() {
+  # Maia has no AUR package: install the official release binary.
+  if command -v maia >/dev/null; then
+    notify "Maia is already installed."
+    return 0
+  fi
+  local url="https://github.com/yappologistic/Maia/releases/latest/download/maia-linux-x86_64"
+  if command -v "$TERMINAL" >/dev/null; then
+    "$TERMINAL" -e bash -c "cd \$(mktemp -d) && curl -fsSL -O $url && chmod +x maia-linux-x86_64 && ./maia-linux-x86_64 --install && maia --set-default; echo; read -n1 -s -r -p 'Done. Press any key to close.'" &
+  else
+    local tmp
+    tmp="$(mktemp -d)"
+    (cd "$tmp" && curl -fsSL -O "$url" && chmod +x maia-linux-x86_64 && ./maia-linux-x86_64 --install && maia --set-default)
+    rm -rf "$tmp"
+  fi
+  notify "Installing Maia..."
+}
+
+install_sung() {
+  # Sung has no AUR package and no releases: build from source,
+  # per-user install into ~/.local (never with sudo).
+  if [[ -x "$HOME/.local/bin/sung" ]]; then
+    notify "Sung is already installed."
+    return 0
+  fi
+  if command -v "$TERMINAL" >/dev/null; then
+    "$TERMINAL" -e bash -c 'mkdir -p "$HOME/.local/src"; if [[ -d "$HOME/.local/src/Sung/.git" ]]; then (cd "$HOME/.local/src/Sung" && git pull --ff-only); else git clone https://github.com/yappologistic/Sung.git "$HOME/.local/src/Sung"; fi; (cd "$HOME/.local/src/Sung" && ./scripts/install.sh); echo; read -n1 -s -r -p "Done. Press any key to close."' &
+  else
+    mkdir -p "$HOME/.local/src"
+    if [[ -d "$HOME/.local/src/Sung/.git" ]]; then
+      (cd "$HOME/.local/src/Sung" && git pull --ff-only)
+    else
+      git clone https://github.com/yappologistic/Sung.git "$HOME/.local/src/Sung"
+    fi
+    (cd "$HOME/.local/src/Sung" && ./scripts/install.sh)
+  fi
+  notify "Installing Sung..."
+}
+
+install_soundcloud() {
+  # No official SoundCloud Linux app: add it as a Chromium web app.
+  mkdir -p "$HOME/.local/share/applications"
+  cat > "$HOME/.local/share/applications/soundcloud.desktop" <<'EOF'
+[Desktop Entry]
+Name=SoundCloud
+Comment=SoundCloud as a web app (Chromium)
+Exec=chromium --app=https://soundcloud.com
+Icon=audio-x-generic
+Type=Application
+Categories=AudioVideo;Audio;
+StartupNotify=true
+EOF
+  notify "SoundCloud web app added."
+}
+
+install_flatpak() {
+  # Flatpak is NOT preinstalled; this sets it up with Flathub on demand.
+  if command -v flatpak >/dev/null && flatpak remotes 2>/dev/null | grep -q flathub; then
+    notify "Flatpak + Flathub are already set up."
+    return 0
+  fi
+  if command -v "$TERMINAL" >/dev/null; then
+    "$TERMINAL" -e bash -c "sudo pacman -S --needed --noconfirm flatpak && flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo; echo; read -n1 -s -r -p 'Done. Press any key to close.'" &
+  else
+    sudo pacman -S --needed flatpak && flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+  fi
+  notify "Installing Flatpak + Flathub..."
+}
+
+main_menu() {
+  rofi_menu "Simorgh" \
+    "󰍹  Install Browser" \
+    "󰆍  Install Terminal" \
+    "󰨞  Install Editor" \
+    "󰉋  Install File Manager" \
+    "󰏖  Install Apps" \
+    "󰅨  Dev Tools" \
+    "󰍳  Gaming" \
+    "󰏘  Themes" \
+    "󰌌  Keybinds" \
+    "󰏖  Install Flatpak" \
+    "󰚰  Update Simorgh" \
+    "󰚰  Update System"
+}
+
+browser_menu() {
+  local choice
+  choice="$(rofi_menu "Install Browser" \
+    "Firefox" \
+    "Brave" \
+    "Zen Browser" \
+    "Chromium (default)")" || return 0
+  case "$choice" in
+    "Firefox")          run_in_terminal firefox ;;
+    "Brave")            run_in_terminal brave-bin ;;
+    "Zen Browser")      run_in_terminal zen-browser-bin ;;
+    "Chromium (default)") run_in_terminal chromium ;;
+    *) return 0 ;;
+  esac
+  notify "Installing $choice..."
+}
+
+terminal_menu() {
+  local choice
+  choice="$(rofi_menu "Install Terminal" \
+    "Alacritty" \
+    "Ghostty" \
+    "Foot" \
+    "Kitty (default)")" || return 0
+  case "$choice" in
+    "Alacritty")        run_in_terminal alacritty ;;
+    "Ghostty")          run_in_terminal ghostty ;;
+    "Foot")             run_in_terminal foot ;;
+    "Kitty (default)")  run_in_terminal kitty ;;
+    *) return 0 ;;
+  esac
+  notify "Installing $choice..."
+}
+
+editor_menu() {
+  local choice
+  choice="$(rofi_menu "Install Editor" \
+    "Neovim" \
+    "Zed" \
+    "VSCodium" \
+    "VS Code (default)")" || return 0
+  case "$choice" in
+    "Neovim")           run_in_terminal neovim ;;
+    "Zed")              run_in_terminal zed ;;
+    "VSCodium")         run_in_terminal vscodium ;;
+    "VS Code (default)") run_in_terminal visual-studio-code-bin ;;
+    *) return 0 ;;
+  esac
+  notify "Installing $choice..."
+}
+
+gaming_menu() {
+  local choice
+  choice="$(rofi_menu "Gaming" \
+    "Steam" \
+    "Heroic Games Launcher" \
+    "Lutris" \
+    "ProtonUp-Qt" \
+    "MangoHud" \
+    "GameMode" \
+    "Install all gaming packages")" || return 0
+  case "$choice" in
+    "Steam")                     run_in_terminal steam ;;
+    "Heroic Games Launcher")     run_in_terminal heroic-games-launcher-bin ;;
+    "Lutris")                    run_in_terminal lutris ;;
+    "ProtonUp-Qt")               run_in_terminal protonup-qt ;;
+    "MangoHud")                  run_in_terminal mangohud ;;
+    "GameMode")                  run_in_terminal gamemode ;;
+    "Install all gaming packages") run_in_terminal steam heroic-games-launcher-bin lutris protonup-qt mangohud gamemode mesa lib32-mesa vulkan-icd-loader lib32-vulkan-icd-loader vulkan-radeon vulkan-intel ;;
+    *) return 0 ;;
+  esac
+  notify "Installing $choice..."
+}
+
+filemanager_menu() {
+  local choice
+  choice="$(rofi_menu "Install File Manager" \
+    "Maia (default)" \
+    "Dolphin" \
+    "Thunar" \
+    "Nautilus")" || return 0
+  case "$choice" in
+    "Maia (default)") install_maia ;;
+    "Dolphin")  run_in_terminal dolphin; notify "Installing Dolphin..." ;;
+    "Thunar")   run_in_terminal thunar; notify "Installing Thunar..." ;;
+    "Nautilus") run_in_terminal nautilus; notify "Installing Nautilus..." ;;
+    *) return 0 ;;
+  esac
+}
+
+devtools_menu() {
+  pick_and_install "Dev Tools" \
+    "C/C++ toolchain (gcc, make, gdb)|gcc make gdb" \
+    "Python|python python-pip" \
+    "Node.js|nodejs npm" \
+    "Rust (rustup)|rustup" \
+    "Go|go" \
+    "Docker|docker docker-compose" \
+    "lazygit|lazygit" \
+    "GitHub CLI|github-cli" \
+    "Install all dev tools|gcc make gdb python python-pip nodejs npm rustup go docker docker-compose lazygit github-cli"
+}
+
+apps_menu() {
+  local choice
+  choice="$(rofi_menu "Install Apps" \
+    "Music" \
+    "Video" \
+    "PDF" \
+    "Image Viewer" \
+    "System Monitor" \
+    "Office" \
+    "Messenger" \
+    "Email" \
+    "Image Editor" \
+    "Recording" \
+    "Passwords" \
+    "Bluetooth" \
+    "Calculator" \
+    "Terminal Multiplexer")" || return 0
+  case "$choice" in
+    "Music")                app_music ;;
+    "Video")                app_video ;;
+    "PDF")                  app_pdf ;;
+    "Image Viewer")         app_image ;;
+    "System Monitor")       app_monitor ;;
+    "Office")               app_office ;;
+    "Messenger")            app_messenger ;;
+    "Email")                app_email ;;
+    "Image Editor")         app_image_editor ;;
+    "Recording")            app_recording ;;
+    "Passwords")            app_passwords ;;
+    "Bluetooth")            app_bluetooth ;;
+    "Calculator")           app_calculator ;;
+    "Terminal Multiplexer") app_tmux ;;
+    *) return 0 ;;
+  esac
+}
+
+app_music() {
+  local choice
+  choice="$(rofi_menu "Music" \
+    "Sung (default)" \
+    "Spotify" \
+    "SoundCloud (web app)" \
+    "Amberol" \
+    "Rhythmbox")" || return 0
+  case "$choice" in
+    "Sung (default)")       install_sung ;;
+    "Spotify")              run_in_terminal spotify; notify "Installing Spotify..." ;;
+    "SoundCloud (web app)") install_soundcloud ;;
+    "Amberol")              run_in_terminal amberol; notify "Installing Amberol..." ;;
+    "Rhythmbox")            run_in_terminal rhythmbox; notify "Installing Rhythmbox..." ;;
+    *) return 0 ;;
+  esac
+}
+
+app_video() {
+  pick_and_install "Video" \
+    "VLC (default)|vlc" \
+    "mpv|mpv" \
+    "Celluloid|celluloid" \
+    "Haruna|haruna"
+}
+
+app_pdf() {
+  pick_and_install "PDF" \
+    "Evince (default)|evince" \
+    "Okular|okular" \
+    "Zathura|zathura"
+}
+
+app_image() {
+  pick_and_install "Image Viewer" \
+    "Loupe (default)|loupe" \
+    "Eye of GNOME (eog)|eog" \
+    "imv|imv"
+}
+
+app_monitor() {
+  pick_and_install "System Monitor" \
+    "btop (default)|btop" \
+    "Mission Center|mission-center"
+}
+
+app_office() {
+  pick_and_install "Office" \
+    "LibreOffice|libreoffice-fresh"
+}
+
+app_messenger() {
+  pick_and_install "Messenger" \
+    "Telegram Desktop|telegram-desktop" \
+    "Vesktop (Discord)|vesktop-bin"
+}
+
+app_email() {
+  pick_and_install "Email" \
+    "Thunderbird|thunderbird"
+}
+
+app_image_editor() {
+  pick_and_install "Image Editor" \
+    "GIMP|gimp"
+}
+
+app_recording() {
+  pick_and_install "Recording" \
+    "OBS Studio|obs-studio"
+}
+
+app_passwords() {
+  pick_and_install "Passwords" \
+    "KeePassXC|keepassxc"
+}
+
+app_bluetooth() {
+  pick_and_install "Bluetooth" \
+    "Blueman|blueman"
+}
+
+app_calculator() {
+  pick_and_install "Calculator" \
+    "GNOME Calculator|gnome-calculator"
+}
+
+app_tmux() {
+  pick_and_install "Terminal Multiplexer" \
+    "tmux|tmux"
+}
+
+main() {
+  command -v rofi >/dev/null || { echo "rofi is required for simorgh-menu" >&2; exit 1; }
+  local choice
+  choice="$(main_menu)" || exit 0
+  case "$choice" in
+    *"Install Browser")       browser_menu ;;
+    *"Install Terminal")      terminal_menu ;;
+    *"Install Editor")        editor_menu ;;
+    *"Install File Manager")  filemanager_menu ;;
+    *"Install Apps")          apps_menu ;;
+    *"Dev Tools")             devtools_menu ;;
+    *"Gaming")                gaming_menu ;;
+    *"Themes")                simorgh-theme ;;
+    *"Keybinds")              simorgh-keybinds ;;
+    *"Install Flatpak")       install_flatpak ;;
+    *"Update Simorgh")
+      if command -v "$TERMINAL" >/dev/null; then
+        "$TERMINAL" -e bash -c "simorgh-update; echo; read -n1 -s -r -p 'Done. Press any key to close.'" &
+      else
+        simorgh-update
+      fi
+      notify "Updating Simorgh..." ;;
+    *"Update System")
+      if command -v "$TERMINAL" >/dev/null; then
+        "$TERMINAL" -e bash -c "yay -Syu; echo; read -n1 -s -r -p 'Done. Press any key to close.'" &
+      else
+        yay -Syu
+      fi
+      notify "Updating system..." ;;
+    *) exit 0 ;;
+  esac
+}
+
+main "$@"

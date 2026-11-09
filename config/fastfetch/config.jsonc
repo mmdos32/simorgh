@@ -1,0 +1,34 @@
+{
+    // Simorgh — Fastfetch configuration (JSONC, comments allowed)
+    "logo": {
+        "type": "text",
+        "string": "Simorgh",
+        "color": {
+            "1": "cyan",
+            "2": "white"
+        }
+    },
+    "display": {
+        "separator": "  ",
+        "color": "cyan"
+    },
+    "modules": [
+        "title",
+        "separator",
+        "os",
+        "host",
+        "kernel",
+        "uptime",
+        "packages",
+        "shell",
+        "de",
+        "wm",
+        "terminal",
+        "cpu",
+        "gpu",
+        "memory",
+        "disk",
+        "break",
+        "colors"
+    ]
+}

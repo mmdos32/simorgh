@@ -1,0 +1,71 @@
+/* Simorgh — SwayNC style (glassy, theme: violet-glass) */
+* {
+    font-family: "JetBrainsMono Nerd Font", "Noto Sans", sans-serif;
+}
+
+.notification-row {
+    outline: none;
+}
+
+.notification {
+    background: rgba(20, 16, 29, 0.65);
+    border: 1px solid rgba(167, 139, 250, 0.4);
+    border-radius: 14px;
+    margin: 6px;
+    padding: 0;
+}
+
+.notification-content {
+    background: transparent;
+    padding: 10px;
+}
+
+.summary {
+    color: #e6edf3;
+    font-weight: bold;
+}
+
+.body {
+    color: #c3ced6;
+}
+
+.time {
+    color: #8b9aa5;
+}
+
+.control-center {
+    background: rgba(20, 16, 29, 0.75);
+    border: 1px solid rgba(167, 139, 250, 0.4);
+    border-radius: 16px;
+}
+
+.control-center-list {
+    background: transparent;
+}
+
+.widget-title {
+    color: #e6edf3;
+    background: transparent;
+    padding: 8px;
+}
+
+.widget-title > button {
+    background: rgba(167, 139, 250, 0.2);
+    color: #a78bfa;
+    border-radius: 8px;
+    padding: 4px 10px;
+}
+
+.widget-dnd {
+    color: #e6edf3;
+    background: transparent;
+    padding: 8px;
+}
+
+.widget-volume, .widget-mpris, .widget-buttons-grid {
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    margin: 6px;
+    padding: 8px;
+    color: #e6edf3;
+}

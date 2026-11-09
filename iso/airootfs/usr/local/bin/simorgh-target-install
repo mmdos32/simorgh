@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# simorgh-target-install — Calamares shellprocess job (runs in the target chroot).
+# Installs the Simorgh desktop into the freshly installed system:
+#   1. finds the user Calamares created (first UID >= 1000)
+#   2. reads the system locale Calamares set
+#   3. runs /opt/simorgh/install.sh --chroot --user <user> --locale <locale>
+#   4. gives the user a real git clone of the repo (~/simorgh)
+#   5. removes every live-only file unpackfs copied into the target
+# Runs as root inside the target. Network is available (Calamares
+# networkcfg copies the live resolv.conf).
+set -euo pipefail
+
+info()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+warn()  { printf '\033[1;33m[!]\033[0m %s\n' "$*"; }
+
+REPO_DIR="/opt/simorgh"
+
+# --- Find the user -----------------------------------------------------------
+TARGET_USER="$(awk -F: '$3 >= 1000 && $3 < 60000 { print $1; exit }' /etc/passwd)"
+[[ -n "$TARGET_USER" ]] || { echo "No regular user found in the target." >&2; exit 1; }
+info "Installing Simorgh for user: $TARGET_USER"
+
+# --- Locale ------------------------------------------------------------------
+LOCALE="$(grep -E '^LANG=' /etc/locale.conf 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
+[[ -n "$LOCALE" ]] || LOCALE="en_US.UTF-8"
+info "Locale: $LOCALE"
+
+# --- Keyring (safety net) ----------------------------------------------------
+if ! pacman-key --list-keys >/dev/null 2>&1; then
+  pacman-key --init --populate archlinux || warn "pacman-key populate failed; package installs may fail."
+fi
+
+# --- The Simorgh install -----------------------------------------------------
+[[ -x "$REPO_DIR/install.sh" ]] || { echo "Simorgh repo not found at $REPO_DIR." >&2; exit 1; }
+"$REPO_DIR/install.sh" --chroot --user "$TARGET_USER" --locale "$LOCALE"
+
+# --- Give the user a real git clone ------------------------------------------
+# The staged /opt/simorgh has no .git (build.sh excludes it), and
+# simorgh-update needs a git repo. Clone it fresh (network is available).
+USER_HOME="/home/$TARGET_USER"
+if [[ -d "$USER_HOME/simorgh" ]]; then
+  rm -rf "$USER_HOME/simorgh"
+fi
+if git clone https://github.com/mmdos32/simorgh.git "$USER_HOME/simorgh"; then
+  info "Cloned the Simorgh repo into $USER_HOME/simorgh."
+else
+  warn "Could not clone the Simorgh repo; keeping the staged copy instead."
+  mv "$REPO_DIR" "$USER_HOME/simorgh"
+fi
+echo "$USER_HOME/simorgh" > "$USER_HOME/.local/share/simorgh/repo-path"
+chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/simorgh" "$USER_HOME/.local/share/simorgh/repo-path"
+rm -rf "$REPO_DIR"
+
+# --- Clean up live-only files ------------------------------------------------
+# unpackfs copied the whole live image into the target; remove everything
+# that belongs to the live session only. Without this, the installed
+# system would autologin a nonexistent liveuser and recreate it on
+# first boot (with passwordless sudo).
+rm -f /etc/sddm.conf.d/autologin.conf
+rm -f /etc/systemd/system/simorgh-live-user.service
+rm -f /etc/systemd/system/multi-user.target.wants/simorgh-live-user.service
+rm -f /usr/local/lib/simorgh-live-setup.sh
+rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
+rm -f /etc/sudoers.d/liveuser /etc/sudoers.d/simorgh-chroot
+rm -rf /etc/calamares
+rm -f /etc/motd
+rm -f /usr/local/bin/simorgh-install /usr/local/bin/simorgh-target-install
+rm -rf /usr/share/simorgh
+info "Simorgh installed in the target system."

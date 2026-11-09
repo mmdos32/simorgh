@@ -1,0 +1,7 @@
+# rose-glass — Simorgh glassy theme (pink glass)
+accent=#fb7185
+background=#1d1216
+background_rgba=rgba(29, 18, 22, 0.65)
+border_rgba=rgba(251, 113, 133, 0.4)
+text=#e6edf3
+wallpaper=rose-glass.png

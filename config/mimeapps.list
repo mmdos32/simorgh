@@ -1,0 +1,25 @@
+# Simorgh — default applications (deployed to ~/.config/mimeapps.list)
+[Default Applications]
+text/html=chromium.desktop
+x-scheme-handler/http=chromium.desktop
+x-scheme-handler/https=chromium.desktop
+text/plain=code.desktop
+text/x-python=code.desktop
+text/x-csrc=code.desktop
+text/x-c++src=code.desktop
+image/png=org.gnome.Loupe.desktop
+image/jpeg=org.gnome.Loupe.desktop
+image/gif=org.gnome.Loupe.desktop
+image/webp=org.gnome.Loupe.desktop
+image/svg+xml=org.gnome.Loupe.desktop
+application/pdf=org.gnome.Evince.desktop
+video/mp4=vlc.desktop
+video/x-matroska=vlc.desktop
+video/webm=vlc.desktop
+audio/mpeg=sung.desktop
+audio/flac=sung.desktop
+audio/x-wav=sung.desktop
+audio/ogg=sung.desktop
+application/zip=org.gnome.FileRoller.desktop
+application/x-compressed-tar=org.gnome.FileRoller.desktop
+inode/directory=maia.desktop

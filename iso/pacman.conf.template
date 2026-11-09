@@ -1,0 +1,28 @@
+# Simorgh live ISO — pacman configuration template, used by mkarchiso
+# at build time. build.sh generates pacman.conf from this file, filling
+# in the absolute path of the local repo below.
+# (Standard Arch layout; multilib is enabled because the installer may
+# need 32-bit packages.)
+[options]
+HoldPkg     = pacman glibc
+Architecture = auto
+CheckSpace
+SigLevel    = Required DatabaseOptional
+LocalFileSigLevel = Optional
+ParallelDownloads = 5
+
+# Local repo with packages that are AUR-only (Calamares is not in the
+# official repos). build.sh builds them once into iso/repo/ and points
+# this entry at that directory. Unsigned on purpose (our own builds).
+[simorgh]
+SigLevel = Never
+Server = file://__SIMORGH_REPO_DIR__
+
+[core]
+Include = /etc/pacman.d/mirrorlist
+
+[extra]
+Include = /etc/pacman.d/mirrorlist
+
+[multilib]
+Include = /etc/pacman.d/mirrorlist

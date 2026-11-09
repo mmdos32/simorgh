@@ -1,0 +1,7 @@
+/* Simorgh theme: ocean-glass — Waybar colors (replaces config/waybar/theme.css) */
+@define-color accent #38bdf8;
+@define-color accent-dim rgba(56, 189, 248, 0.25);
+@define-color bg rgba(12, 22, 32, 0.65);
+@define-color module-bg rgba(255, 255, 255, 0.06);
+@define-color text #e6edf3;
+@define-color border rgba(56, 189, 248, 0.4);

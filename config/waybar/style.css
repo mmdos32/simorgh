@@ -1,0 +1,83 @@
+/* Simorgh — Waybar style (glassy). Colors come from theme.css,
+   which simorgh-theme replaces on every theme switch. */
+@import "theme.css";
+
+* {
+    font-family: "JetBrainsMono Nerd Font", "Noto Sans", sans-serif;
+    font-size: 13px;
+    border: none;
+    border-radius: 0;
+}
+
+window#waybar {
+    background: @bg;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 12px;
+}
+
+#workspaces button {
+    padding: 0 8px;
+    margin: 4px 2px;
+    color: @text;
+    background: transparent;
+    border-radius: 8px;
+}
+
+#workspaces button.active {
+    background: @accent;
+    color: #0d1418;
+}
+
+#workspaces button:hover {
+    background: @accent-dim;
+    color: @text;
+}
+
+#clock,
+#cpu,
+#memory,
+#network,
+#pulseaudio,
+#battery,
+#mpris,
+#custom-weather,
+#custom-updates,
+#tray {
+    padding: 0 10px;
+    margin: 4px 2px;
+    color: @text;
+    background: @module-bg;
+    border-radius: 8px;
+}
+
+#clock {
+    color: @accent;
+    font-weight: bold;
+}
+
+#battery.warning {
+    color: #fbbf24;
+}
+
+#battery.critical {
+    color: #f87171;
+}
+
+#network.disconnected {
+    color: #f87171;
+}
+
+#pulseaudio.muted {
+    color: #8b9aa5;
+}
+
+tooltip {
+    background: @bg;
+    border: 1px solid @border;
+    border-radius: 10px;
+}
+
+tooltip label {
+    color: @text;
+}

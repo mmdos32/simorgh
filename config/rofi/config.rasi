@@ -1,0 +1,13 @@
+/* Simorgh — Rofi base config. Colors come from theme.rasi,
+   which simorgh-theme replaces on every theme switch. */
+configuration {
+    modi: "drun,calc,emoji";
+    show-icons: true;
+    drun-display-format: "{name}";
+    font: "JetBrainsMono Nerd Font 11";
+    display-drun: "Apps";
+    display-run: "Run";
+    display-window: "Windows";
+}
+
+@import "theme.rasi"

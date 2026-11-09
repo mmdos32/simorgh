@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# simorgh-keybinds — the Simorgh shortcuts guide (Omarchy-style cheatsheet).
+# Opens a searchable Rofi list of every keybind; Esc closes it.
+# Open with SUPER + K, or from simorgh-menu.
+set -euo pipefail
+
+list() {
+  cat <<'EOF'
+SUPER + Return — Kitty terminal
+SUPER + D — Rofi app launcher
+SUPER + E — Maia file manager
+SUPER + B — Chromium browser
+SUPER + C — VS Code editor
+SUPER + U — Sung music player
+SUPER + M — Simorgh menu (apps, gaming, updates)
+SUPER + T — Switch theme
+SUPER + N — Notifications center
+SUPER + SHIFT + N — Do Not Disturb on/off
+SUPER + K — This shortcuts guide
+SUPER + Q — Close window
+SUPER + SHIFT + Q — Exit Hyprland
+SUPER + F — Fullscreen
+SUPER + V — Toggle floating
+SUPER + P — Pseudo-tiling
+SUPER + J — Toggle split direction
+SUPER + L — Lock screen
+SUPER + SHIFT + L — Lock + suspend
+SUPER + SHIFT + E — Power menu (lock/logout/suspend/reboot/power off)
+SUPER + SHIFT + R — Reload Hyprland config
+SUPER + Tab — Next window
+SUPER + SHIFT + Tab — Previous window
+SUPER + grave (`) — Scratchpad terminal
+SUPER + R — Resize mode (arrows to resize, Esc to exit)
+SUPER + arrows — Move focus
+SUPER + CTRL + left/right — Focus monitor (multi-monitor)
+SUPER + SHIFT + arrows — Move window
+SUPER + 1..0 — Switch workspace
+SUPER + SHIFT + 1..0 — Move window to workspace
+SUPER + CTRL + 1..0 — Move window to workspace silently
+SUPER + Z — Previous workspace
+SUPER + SHIFT + V — Clipboard history
+SUPER + ALT + C — Calculator (Rofi)
+SUPER + ALT + P — Color picker (copies hex)
+SUPER + ALT + R — Toggle screen recording
+SUPER + ALT + B — Toggle Waybar
+SUPER + . — Emoji picker
+Print — Full-screen screenshot
+SUPER + SHIFT + S — Region screenshot to file
+SUPER + SHIFT + C — Region screenshot to clipboard
+Alt + Shift — Switch keyboard layout (us / ir)
+XF86AudioRaiseVolume / LowerVolume / Mute — Volume
+XF86AudioMicMute — Mute microphone
+XF86MonBrightnessUp / Down — Brightness
+XF86AudioPlay / Next / Prev — Media playback
+SUPER + mouse drag — Move / resize window
+SUPER + mouse wheel — Switch workspace
+EOF
+}
+
+if command -v rofi >/dev/null; then
+  list | rofi -dmenu -p "Simorgh keybinds — type to search" -i
+else
+  list
+fi

@@ -1,0 +1,7 @@
+/* Simorgh theme: ember-glass — Waybar colors (replaces config/waybar/theme.css) */
+@define-color accent #fb923c;
+@define-color accent-dim rgba(251, 146, 60, 0.25);
+@define-color bg rgba(28, 19, 12, 0.65);
+@define-color module-bg rgba(255, 255, 255, 0.06);
+@define-color text #e6edf3;
+@define-color border rgba(251, 146, 60, 0.4);

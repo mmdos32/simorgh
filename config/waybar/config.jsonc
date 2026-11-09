@@ -1,0 +1,121 @@
+{
+    // Simorgh — Waybar configuration (JSONC, comments allowed)
+    "layer": "top",
+    "position": "top",
+    "height": 38,
+    "spacing": 6,
+    "margin-top": 8,
+    "margin-left": 10,
+    "margin-right": 10,
+    "modules-left": ["hyprland/workspaces"],
+    "modules-center": ["clock", "mpris"],
+    "modules-right": ["cpu", "memory", "network", "pulseaudio", "battery", "custom/updates", "custom/weather", "tray"],
+
+    "hyprland/workspaces": {
+        "format": "{icon}",
+        "format-icons": {
+            "1": "1",
+            "2": "2",
+            "3": "3",
+            "4": "4",
+            "5": "5",
+            "6": "6",
+            "7": "7",
+            "8": "8",
+            "9": "9",
+            "10": "10"
+        },
+        "on-click": "activate"
+    },
+
+    "clock": {
+        "format": "{:%a %d %b  %H:%M}",
+        "tooltip-format": "<tt><small>{calendar}</small></tt>",
+        "calendar": {
+            "mode": "month",
+            "on-scroll": 1,
+            "format": {
+                "months": "<b>{}</b>",
+                "days": "<span color='#e6edf3'>{}</span>",
+                "weekdays": "<span color='#8b9aa5'>{}</span>",
+                "today": "<b>{}</b>"
+            }
+        }
+    },
+
+    "cpu": {
+        "format": " {usage}%",
+        "interval": 5
+    },
+
+    "memory": {
+        "format": "󰍛 {}%",
+        "interval": 5
+    },
+
+    "network": {
+        "format-wifi": "󰖩 {essid} {signalStrength}%",
+        "format-ethernet": "󰈀 {ifname}",
+        "format-disconnected": "󰖪 offline",
+        "tooltip-format": "{ifname} · {ipaddr}",
+        "interval": 5
+    },
+
+    "pulseaudio": {
+        "format": "{icon} {volume}%",
+        "format-muted": "󰝟 muted",
+        "format-icons": {
+            "headphone": "󰋋",
+            "hands-free": "󰋋",
+            "headset": "󰋋",
+            "phone": "",
+            "portable": "",
+            "car": "",
+            "default": ["󰕿", "󰖀", "󰕾"]
+        },
+        "on-click": "pavucontrol"
+    },
+
+    "battery": {
+        "format": "{icon} {capacity}%",
+        "format-charging": "󰂄 {capacity}%",
+        "format-icons": ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"],
+        "states": {
+            "warning": 30,
+            "critical": 15
+        }
+    },
+
+    "tray": {
+        "spacing": 8
+    },
+
+    "mpris": {
+        "format": "{player_icon} {title} - {artist}",
+        "format-paused": "⏸ {title}",
+        "player-icons": {
+            "default": "♪"
+        },
+        "status-icons": {
+            "playing": "▶",
+            "paused": "⏸"
+        },
+        "max-length": 40,
+        "on-click": "playerctl play-pause"
+    },
+
+    "custom/weather": {
+        "format": "{}",
+        "exec": "curl -s 'wttr.in/?format=1' 2>/dev/null || echo 'weather offline'",
+        "interval": 1800,
+        "tooltip-format": "Weather from wttr.in (updates every 30 min)"
+    },
+
+    "custom/updates": {
+        "format": "󰏔 {}",
+        "exec": "checkupdates 2>/dev/null | wc -l",
+        "interval": 1800,
+        "on-click": "kitty -e bash -c 'yay -Syu; echo; read -n1 -s -r -p \"Done. Press any key to close.\"'",
+        "tooltip-format": "{} pending updates (click to update)"
+    }
+}

@@ -1,0 +1,18 @@
+
+   ███████╗██╗███╗   ███╗ ██████╗ ██████╗  ██████╗ ██╗  ██╗
+   ██╔════╝██║████╗ ████║██╔═══██╗██╔══██╗██╔════╝ ██║  ██║
+   ███████╗██║██╔████╔██║██║   ██║██████╔╝██║  ███╗███████║
+   ╚════██║██║██╔████╔██║██║   ██║██╔══██╗██║   ██║██╔══██║
+   ███████║██║██║ ╚═╝ ██║╚██████╔╝██║  ██║╚██████╔╝██║  ██║
+   ╚══════╝╚═╝╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝
+
+   Simorgh live installer — welcome.
+
+   The graphical installer starts automatically on the desktop.
+   Just click through it: language, disk, user, install, reboot.
+
+   No WiFi yet? Connect first:
+       iwctl station wlan0 connect <network>   (or run: nmtui)
+
+   No desktop? Fall back to the console installer:
+       simorgh-install

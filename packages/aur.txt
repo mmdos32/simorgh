@@ -1,0 +1,11 @@
+# Simorgh — AUR packages (installed via yay by install.sh)
+# One package per line. Lines starting with # are comments.
+
+visual-studio-code-bin
+vazirmatn-fonts
+sddm-sugar-candy-git
+bibata-cursor-theme
+# NOTE: colloid-gtk-theme-git is NOT listed here — install.sh installs the
+# Colloid-Dark theme from the upstream repo with its own install.sh
+# (`makepkg --pkg` does not exist in pacman 7, and building all 6 splits
+# with plain makepkg wastes ~60 min).

@@ -1,0 +1,12 @@
+[Unit]
+Description=Simorgh live session setup (live user + desktop config)
+Before=display-manager.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/simorgh-live-setup.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

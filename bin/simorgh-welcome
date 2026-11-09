@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# simorgh-welcome — first-boot welcome screen.
+# Shows once, on the first login after install; later logins go
+# straight to the desktop. Run once at Hyprland start (see the
+# hyprland.start handler in hyprland.lua).
+set -euo pipefail
+
+FLAG="$HOME/.local/share/simorgh/.first-run-done"
+[[ -f "$FLAG" ]] && exit 0
+mkdir -p "$HOME/.local/share/simorgh"
+touch "$FLAG"
+
+if ! command -v kitty >/dev/null; then
+  command -v notify-send >/dev/null && notify-send "Simorgh" "Welcome to Simorgh — press SUPER + K for the shortcuts guide." 2>/dev/null || true
+  exit 0
+fi
+
+kitty --class simorgh-welcome -e bash -c '
+cat << "EOF"
+
+   ███████╗██╗███╗   ███╗ ██████╗ ██████╗  ██████╗ ██╗  ██╗
+   ██╔════╝██║████╗ ████║██╔═══██╗██╔══██╗██╔════╝ ██║  ██║
+   ███████╗██║██╔████╔██║██║   ██║██████╔╝██║  ███╗███████║
+   ╚════██║██║██║╚██╔╝██║██║   ██║██╔══██╗██║   ██║██╔══██║
+   ███████║██║██║ ╚═╝ ██║╚██████╔╝██║  ██║╚██████╔╝██║  ██║
+   ╚══════╝╚═╝╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝
+
+   Welcome to Simorgh — a minimal, modern, glassy Arch desktop.
+   Hyprland · Waybar · Rofi · Kitty · Maia · Sung
+
+   Start here:
+     SUPER + K        all keyboard shortcuts
+     SUPER + D        app launcher
+     SUPER + M        Simorgh menu (apps, gaming, themes, updates)
+     SUPER + T        switch theme (6 glassy themes)
+     SUPER + E        Maia file manager
+     Alt + Shift      switch keyboard layout (us / ir)
+
+   This screen shows only once. Enjoy the flight.
+
+EOF
+echo
+read -n1 -s -r -p "   Press any key to close…"
+' &

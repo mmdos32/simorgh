@@ -1,0 +1,60 @@
+# Simorgh live ISO — packages in the live environment.
+# The live session IS a Simorgh desktop: it boots into Hyprland and
+# starts Calamares (the graphical installer) automatically.
+# Chromium / VS Code / the rest of the desktop apps are NOT here — they
+# are installed into the target by Calamares (see modules/packages.conf,
+# generated from packages/pacman.txt).
+# One package per line. Lines starting with # are comments.
+
+base
+linux
+linux-firmware
+intel-ucode
+amd-ucode
+archinstall
+git
+curl
+sudo
+networkmanager
+nano
+parted
+dosfstools
+e2fsprogs
+cryptsetup
+lvm2
+jq
+python
+
+# Graphical installer
+calamares
+
+# Live desktop (Simorgh's own stack, so the live session looks and
+# feels like the installed system)
+hyprland
+waybar
+rofi
+kitty
+sddm
+swaync
+hyprpaper
+hyprpolkitagent
+xdg-desktop-portal-hyprland
+qt6-wayland
+pipewire
+wireplumber
+zsh
+zsh-autosuggestions
+zsh-syntax-highlighting
+starship
+noto-fonts
+noto-fonts-emoji
+ttf-jetbrains-mono-nerd
+libnotify
+dconf
+wl-clipboard
+grim
+slurp
+brightnessctl
+playerctl
+pavucontrol
+network-manager-applet

@@ -1,0 +1,23 @@
+# Simorgh — alternative apps
+# NOT installed by install.sh. Install from the menu: simorgh-menu
+# One package per line. Lines starting with # are comments.
+
+# Browsers (default is chromium)
+firefox
+brave-bin
+zen-browser-bin
+
+# Terminals (default is kitty)
+alacritty
+ghostty
+foot
+
+# Editors (default is visual-studio-code-bin)
+zed
+vscodium
+
+# File managers (default is Maia, installed by install.sh from its
+# official GitHub release — there is no AUR package)
+dolphin
+thunar
+nautilus

@@ -1,0 +1,78 @@
+# Simorgh — everyday apps
+# NOT installed by install.sh. Install from the menu:
+# simorgh-menu -> Apps (or Dev Tools for the toolchain list below).
+# One package per line. Lines starting with # are comments.
+
+# Music (default: Sung — installed from source by install.sh)
+# Spotify is installed from the menu (AUR, via yay).
+# SoundCloud has no package: the menu creates a Chromium web-app
+# .desktop entry for it on demand (see simorgh-menu).
+spotify
+amberol
+rhythmbox
+
+# Video (default: vlc)
+mpv
+celluloid
+haruna
+
+# PDF (default: evince)
+okular
+zathura
+
+# Image viewer (default: loupe)
+eog
+imv
+
+# System monitor (default: btop)
+mission-center
+
+# Office
+libreoffice-fresh
+
+# Messenger
+telegram-desktop
+vesktop-bin
+
+# Email
+thunderbird
+
+# Image editor
+gimp
+
+# Recording
+obs-studio
+
+# Password manager
+keepassxc
+
+# Bluetooth
+blueman
+
+# Calculator
+gnome-calculator
+
+# Terminal multiplexer
+tmux
+
+# --- Dev tools (menu: simorgh-menu -> Dev Tools) ---
+# None of these are preinstalled; install what you need.
+# C/C++ toolchain
+gcc
+make
+gdb
+# Python (python + nodejs are already installed by default — see
+# packages/pacman.txt — so they are not listed again here)
+python-pip
+# Node.js
+npm
+# Rust
+rustup
+# Go
+go
+# Docker
+docker
+docker-compose
+# Git helpers
+lazygit
+github-cli

@@ -1,0 +1,21 @@
+# Simorgh — gaming packages
+# NOT installed by install.sh. Install from the menu: simorgh-menu -> Gaming
+# One package per line. Lines starting with # are comments.
+# steam needs the multilib repository enabled in /etc/pacman.conf.
+
+steam
+heroic-games-launcher-bin
+lutris
+protonup-qt
+mangohud
+gamemode
+
+# Graphics drivers for gaming (installed with the menu's gaming set):
+# Mesa + Vulkan for AMD/Intel, 32-bit libs for Steam/Proton.
+# NVIDIA cards get their own driver automatically at install time.
+mesa
+lib32-mesa
+vulkan-icd-loader
+lib32-vulkan-icd-loader
+vulkan-radeon
+vulkan-intel

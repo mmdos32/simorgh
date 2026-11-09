@@ -1,0 +1,28 @@
+# Simorgh — Starship prompt (minimal two-line, teal accent)
+format = """
+$directory$git_branch$git_status$cmd_duration
+$character"""
+
+add_newline = false
+
+[character]
+success_symbol = "[❯](bold #2dd4bf)"
+error_symbol = "[❯](bold red)"
+
+[directory]
+style = "bold #2dd4bf"
+truncation_length = 4
+truncate_to_repo = true
+
+[git_branch]
+symbol = " "
+style = "bold #a78bfa"
+format = "[$symbol$branch]($style) "
+
+[git_status]
+style = "bold #fbbf24"
+format = "[$all_status$ahead_behind]($style) "
+
+[cmd_duration]
+min_time = 2000
+format = "took [$duration](bold yellow) "

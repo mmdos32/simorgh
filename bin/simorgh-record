@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# simorgh-record — toggle screen recording with wf-recorder.
+# First press: pick a region with slurp, recording starts.
+# Second press: stops and saves to ~/Videos/Simorgh.
+set -euo pipefail
+
+OUT="$HOME/Videos/Simorgh"
+mkdir -p "$OUT"
+
+notify() {
+  command -v notify-send >/dev/null && notify-send "Simorgh" "$*" 2>/dev/null || true
+}
+
+if pgrep -x wf-recorder >/dev/null; then
+  pkill -INT -x wf-recorder
+  notify "Recording stopped — saved to $OUT"
+  exit 0
+fi
+
+region="$(slurp)" || exit 0
+file="$OUT/$(date +%Y-%m-%d_%H-%M-%S).mp4"
+wf-recorder -g "$region" -f "$file" &
+notify "Recording started"

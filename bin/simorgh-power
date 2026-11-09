@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# simorgh-power — Rofi power menu: lock, logout, suspend, reboot, power off.
+set -euo pipefail
+
+choice="$(printf 'Lock\nLogout\nSuspend\nReboot\nPower off' | rofi -dmenu -p "Power" -i)" || exit 0
+case "$choice" in
+  "Lock")      hyprlock ;;
+  "Logout")    hyprctl dispatch exit ;;
+  "Suspend")   hyprlock & sleep 1; systemctl suspend ;;
+  "Reboot")    systemctl reboot ;;
+  "Power off") systemctl poweroff ;;
+  *) exit 0 ;;
+esac

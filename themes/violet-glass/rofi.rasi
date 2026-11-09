@@ -1,0 +1,63 @@
+/* Simorgh theme: violet-glass — Rofi colors (replaces config/rofi/theme.rasi) */
+* {
+    accent: #a78bfa;
+    background: rgba (20, 16, 29, 65%);
+    background-alt: rgba (255, 255, 255, 6%);
+    foreground: #e6edf3;
+    selected: #a78bfa;
+    selected-foreground: #14101d;
+    bordercol: rgba (167, 139, 250, 40%);
+}
+
+window {
+    background-color: @background;
+    border: 1px solid @bordercol;
+    border-radius: 14px;
+    padding: 12px;
+    width: 560px;
+}
+
+mainbox {
+    background-color: transparent;
+}
+
+inputbar {
+    background-color: @background-alt;
+    border-radius: 10px;
+    padding: 8px;
+    margin: 0 0 8px 0;
+}
+
+prompt {
+    background-color: transparent;
+    text-color: @accent;
+}
+
+entry {
+    background-color: transparent;
+    text-color: @foreground;
+    placeholder-color: #8b9aa5;
+}
+
+listview {
+    background-color: transparent;
+    lines: 8;
+    columns: 1;
+    spacing: 4px;
+}
+
+element {
+    background-color: transparent;
+    text-color: @foreground;
+    border-radius: 8px;
+    padding: 8px;
+}
+
+element selected {
+    background-color: @selected;
+    text-color: @selected-foreground;
+}
+
+element-text, element-icon {
+    background-color: transparent;
+}

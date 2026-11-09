@@ -1,0 +1,6 @@
+# Simorgh — session environment (read by SDDM on login).
+# Puts the Simorgh commands (~/.local/bin) on the session PATH so
+# Hyprland keybinds, the welcome screen, and Waybar clicks can run them.
+# (Interactive zsh sets this in .zshrc too, but the SDDM session never
+# reads .zshrc — without this file the keybinds silently do nothing.)
+export PATH="$HOME/.local/bin:$PATH"

@@ -1,0 +1,8 @@
+*.log
+.DS_Store
+*.iso
+iso/work/
+iso/out/
+iso/repo/
+iso/pacman.conf
+iso/airootfs/opt/simorgh/
