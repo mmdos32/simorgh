@@ -33,14 +33,14 @@ jobs:
     steps:
       - name: Download ISO from source release
         run: |
-          gh release download "${{ inputs.source_tag }}" --pattern '*.iso'
+          gh release download "${{ inputs.source_tag }}" --repo mmdos32/simorgh --pattern '*.iso'
           mv simorgh-*.iso "simorgh-${{ inputs.version }}-x86_64.iso"
           ls -lh simorgh-*.iso
           sha256sum simorgh-*.iso
 
       - name: Delete source release
         if: ${{ inputs.delete_source }}
-        run: gh release delete "${{ inputs.source_tag }}" --yes --cleanup-tag
+        run: gh release delete "${{ inputs.source_tag }}" --repo mmdos32/simorgh --yes --cleanup-tag
 
       - name: Create versioned release
         uses: softprops/action-gh-release@v2
