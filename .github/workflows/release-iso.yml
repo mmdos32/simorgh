@@ -1,0 +1,50 @@
+# Publish an already-built ISO as a versioned release (no build).
+#
+# Manual trigger only. It downloads the ISO from an existing release,
+# renames it to simorgh-<version>-x86_64.iso, deletes the old release
+# (with its tag), and creates the new release. Use it to fix a release
+# name without rebuilding the ISO.
+# Example: source simorgh-iso-3 -> v1.0.
+name: Publish ISO release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: 'Tag of the release the ISO is downloaded from'
+        required: true
+        default: 'simorgh-iso-3'
+      version:
+        description: 'Version for the new release (tag will be v<version>)'
+        required: true
+        default: '1.0'
+      delete_source:
+        description: 'Delete the source release and its tag'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download ISO from source release
+        run: |
+          gh release download "${{ inputs.source_tag }}" --pattern '*.iso'
+          mv simorgh-*.iso "simorgh-${{ inputs.version }}-x86_64.iso"
+          ls -lh simorgh-*.iso
+          sha256sum simorgh-*.iso
+
+      - name: Delete source release
+        if: ${{ inputs.delete_source }}
+        run: gh release delete "${{ inputs.source_tag }}" --yes --cleanup-tag
+
+      - name: Create versioned release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: Simorgh ${{ inputs.version }}
+          files: simorgh-*.iso
