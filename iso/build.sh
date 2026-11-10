@@ -61,8 +61,9 @@ tar --exclude=.git --exclude=iso/work --exclude=iso/out \
 
 rm -rf work out
 mkarchiso -v -w work -o out .
+iso_file="$(ls out/*.iso | head -n 1)"
 echo
-echo "ISO built: out/$(ls out/*.iso)"
+echo "ISO built: $iso_file"
 echo "Write it to a USB stick (example):"
-echo "  sudo dd if=out/$(ls out/*.iso | xargs -n1 basename) of=/dev/sdX bs=4M status=progress oflag=sync"
+echo "  sudo dd if=$iso_file of=/dev/sdX bs=4M status=progress oflag=sync"
 echo "Replace /dev/sdX with your actual USB device (check with lsblk first)."

@@ -8,7 +8,16 @@
 
 base
 linux
+# archiso initramfs hooks (without these the live ISO cannot find or
+# mount its own root filesystem — boot fails at Switch Root)
+mkinitcpio-archiso
+mkinitcpio-nfs-utils
 linux-firmware
+# Bootloader (required by mkarchiso profile validation)
+syslinux
+memtest86+
+memtest86+-efi
+edk2-shell
 intel-ucode
 amd-ucode
 archinstall

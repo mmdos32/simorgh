@@ -51,11 +51,13 @@ cached package. The repo directory is gitignored.
 
 ## What this ISO is — and isn't
 
-- **It has never been built or booted here.** This machine has no
-  Arch/pacman/archiso, so everything is validated by reading only
-  (shell syntax, YAML, JSON, file lists). The first real build +
-  boot + full install test on Arch hardware is still owed before
-  advertising the ISO.
+- **It has been built and booted (test 7, 2026-11-09).** The ISO
+  builds (`simorgh-2026.11.09-x86_64.iso`, ~1.7 GB) and boots to
+  the live Hyprland desktop; Calamares starts after the `slideshow`
+  fix below. The full graphical install + reboot into the installed
+  system is still unverified — the test VM's keyboard/display froze
+  under load before the install could be driven. See the test-7
+  report for the full story.
 - **Disk encryption** is offered by Calamares (LUKS, optional).
 - **Dual-boot is not officially supported in v1.** Calamares can
   install alongside another OS with manual partitioning, but we
@@ -81,6 +83,11 @@ iso/
   packages.x86_64          packages in the live environment
   build.sh                 mkarchiso wrapper (run as root on Arch)
   gen-packages-conf.py     generates the Calamares package list
+  syslinux/                BIOS boot menu (from archiso releng,
+                           rebranded to Simorgh; splash.png is the
+                           phoenix signature, 640x480)
+  efiboot/loader/          UEFI boot entries (loader.conf +
+                           01/02/03-simorgh-*.conf)
   repo/                    local pacman repo (Calamares build, cached,
                            created at build time, gitignored)
   airootfs/
@@ -95,11 +102,20 @@ iso/
     etc/profile.d/simorgh.sh   session PATH for the live user
     etc/calamares/
       settings.conf        module sequence + the simorgh shellprocess job
-      branding/simorgh/    logo, welcome image (colors in branding.desc)
+      branding/simorgh/    logo, welcome image (colors in branding.desc);
+                           show.qml + squid.png are the Calamares
+                           default slideshow (stand-in — rebrand later)
       modules/             welcome, locale, partition, users,
                            unpackfs, packages, bootloader,
                            displaymanager, finished, shellprocess@simorgh
                            (keyboard/mount/fstab use Calamares defaults)
+    etc/mkinitcpio.conf.d/archiso.conf   archiso initramfs hooks
+                           (from releng — without these the live ISO
+                           cannot mount its own root)
+    etc/locale.conf        LANG=en_US.UTF-8 (pre-set so the live boot
+    etc/vconsole.conf      KEYMAP=us   does not stop at the
+    etc/localtime          -> ../usr/share/zoneinfo/UTC   systemd-
+                           firstboot prompt)
     etc/sddm.conf.d/autologin.conf       live session autologin
     etc/sddm.conf.d/simorgh-software-render.conf
                                          greeter software rendering
@@ -109,6 +125,9 @@ iso/
     etc/systemd/system/display-manager.service -> sddm (symlink)
     etc/systemd/system/multi-user.target.wants/simorgh-live-user.service
                            (symlink, enables the live setup service)
+    etc/systemd/system/multi-user.target.wants/NetworkManager.service
+                           (symlink — the live session needs a working
+                           network before Calamares runs)
     etc/motd               welcome banner on the console
     etc/hostname           simorgh-live
     etc/systemd/system/getty@tty1.service.d/autologin.conf
@@ -116,8 +135,9 @@ iso/
 
 ## Known issues for the first push
 
-- **Symlinks in the repo.** Two symlinks above (`display-manager.service`
-  and the `.wants` entry) are part of the ISO. Pushing via the git
+- **Symlinks in the repo.** Four symlinks above (`display-manager.service`,
+  the two `.wants` entries, and `etc/localtime`) are part of the ISO.
+  Pushing via the git
   database API must store them as symlinks (mode `120000`, content =
   the target path), not as regular files — check the push script
   handles that before pushing.

@@ -34,15 +34,21 @@ if [[ -d "$REPO_DIR/config" ]]; then
   mkdir -p "$USER_HOME/.config/hypr/themes"
   [[ -f "$REPO_DIR/config/hypr/themes/active.lua" ]] && cp "$REPO_DIR/config/hypr/themes/active.lua" "$USER_HOME/.config/hypr/themes/active.lua"
   echo "teal-glass" > "$USER_HOME/.config/hypr/themes/current"
-  # Wallpaper for the live session.
-  if [[ -f "$USER_HOME/.local/share/simorgh/wallpapers/simorgh-signature.png" ]]; then
-    cp "$USER_HOME/.local/share/simorgh/wallpapers/simorgh-signature.png" "$USER_HOME/.config/hypr/wallpaper.png"
+  # Wallpaper for the live session (phoenix signature). If the signature
+  # copy is missing for any reason, fall back to the theme gradient so
+  # hyprpaper always has a valid file, and say so on stderr.
+  wallpaper_src="$USER_HOME/.local/share/simorgh/wallpapers/simorgh-signature.png"
+  [[ -f "$wallpaper_src" ]] || wallpaper_src="$USER_HOME/.local/share/simorgh/wallpapers/teal-glass.png"
+  if [[ -f "$wallpaper_src" ]]; then
+    cp "$wallpaper_src" "$USER_HOME/.config/hypr/wallpaper.png"
     cat > "$USER_HOME/.config/hypr/hyprpaper.conf" <<EOF
 preload = $USER_HOME/.config/hypr/wallpaper.png
 wallpaper = ,$USER_HOME/.config/hypr/wallpaper.png
 splash = false
 ipc = on
 EOF
+  else
+    echo "simorgh-live-setup: no wallpaper file found, hyprpaper left as shipped" >&2
   fi
   # Start Calamares instead of the welcome screen when Hyprland starts.
   # Via sudo (the live user has NOPASSWD sudo): running it as root
