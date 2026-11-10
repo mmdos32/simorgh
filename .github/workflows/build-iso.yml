@@ -1,0 +1,76 @@
+# Build the Simorgh live ISO with GitHub Actions.
+#
+# Manual trigger only (workflow_dispatch): nothing runs on push, so no
+# commit ever gets a red X from this workflow. Test it on a branch first;
+# only merge to main once a run is green.
+#
+# How to run:
+#   1. GitHub repo page -> Actions -> "Build ISO" -> "Run workflow".
+#   2. Pick the branch (ci-test for testing, main for a real build).
+#   3. "Create a GitHub Release" only works from main, and only when
+#      ticked; otherwise the ISO is just uploaded as an artifact.
+#
+# The build runs inside the official archlinux:base-devel container with
+# --privileged (mkarchiso needs loop devices and mounts), exactly like
+# the manual build: sudo ./iso/build.sh (see iso/README.md).
+# The Calamares AUR package is cached (iso/repo/) so only the first
+# build pays the compile time.
+name: Build ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a GitHub Release with the ISO (only works from main)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write # needed only by the release step
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/hostedtoolcache /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo docker image prune -af || true
+          df -h
+
+      - uses: actions/checkout@v4
+
+      - name: Cache Calamares package
+        uses: actions/cache@v4
+        with:
+          path: iso/repo
+          key: calamares-3.4.2
+
+      - name: Build ISO in Arch container
+        run: |
+          docker run --privileged --rm \
+            -v "${{ github.workspace }}:/build" \
+            -w /build \
+            archlinux:base-devel \
+            bash -c 'set -euo pipefail; pacman -Syu --noconfirm archiso git sudo python; useradd -m builder; echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers; sudo -u builder sudo ./iso/build.sh'
+
+      - name: Show ISO checksum
+        run: |
+          ls -lh iso/out/
+          sha256sum iso/out/*.iso
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: simorgh-iso
+          path: iso/out/*.iso
+          retention-days: 30
+
+      - name: Create release
+        if: ${{ inputs.create_release && github.ref == 'refs/heads/main' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: simorgh-iso-${{ github.run_number }}
+          name: Simorgh ISO #${{ github.run_number }}
+          files: iso/out/*.iso
