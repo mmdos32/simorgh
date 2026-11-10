@@ -43,6 +43,11 @@ Write it to USB with balenaEtcher, or with `dd` (see the message
 `build.sh` prints — double-check the device with `lsblk` first;
 `dd` erases the target).
 
+No Arch machine? The ISO is also built by GitHub Actions: repo →
+Actions → "Build ISO" → Run workflow (manual trigger only) →
+download the `simorgh-iso` artifact from the run, or the release
+if the release option was ticked.
+
 **Calamares comes from a local repo.** Calamares is not in the Arch
 official repos (AUR only), so `build.sh` builds it once from the AUR
 into `iso/repo/` (a local pacman repo, ~10 minutes the first time)
@@ -51,13 +56,13 @@ cached package. The repo directory is gitignored.
 
 ## What this ISO is — and isn't
 
-- **It has been built and booted (test 7, 2026-11-09).** The ISO
-  builds (`simorgh-2026.11.09-x86_64.iso`, ~1.7 GB) and boots to
-  the live Hyprland desktop; Calamares starts after the `slideshow`
-  fix below. The full graphical install + reboot into the installed
-  system is still unverified — the test VM's keyboard/display froze
-  under load before the install could be driven. See the test-7
-  report for the full story.
+- **Installing from it is still untested.** The ISO is published
+  as v1.0 (`simorgh-1.0-x86_64.iso`, ~1.48 GB, built by GitHub
+  Actions) and boots to the live Hyprland desktop, with Calamares
+  starting — but the full graphical install + reboot into the
+  installed system has not been verified end-to-end. In the test
+  VM the keyboard/display froze under load before the install
+  could be driven.
 - **Disk encryption** is offered by Calamares (LUKS, optional).
 - **Dual-boot is not officially supported in v1.** Calamares can
   install alongside another OS with manual partitioning, but we
@@ -132,12 +137,3 @@ iso/
     etc/hostname           simorgh-live
     etc/systemd/system/getty@tty1.service.d/autologin.conf
 ```
-
-## Known issues for the first push
-
-- **Symlinks in the repo.** Four symlinks above (`display-manager.service`,
-  the two `.wants` entries, and `etc/localtime`) are part of the ISO.
-  Pushing via the git
-  database API must store them as symlinks (mode `120000`, content =
-  the target path), not as regular files — check the push script
-  handles that before pushing.

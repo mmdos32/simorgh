@@ -63,18 +63,20 @@ the script is for people who already have Arch.
 
 ### From the ISO (recommended)
 
-1. Build the ISO (on Arch Linux) or download it when a release is
-   published: `sudo ./iso/build.sh` — see `iso/README.md` for the
-   details. Write it to a USB stick with balenaEtcher or `dd`.
+1. Download the ISO from the [v1.0 release](https://github.com/mmdos32/simorgh/releases/download/v1.0/simorgh-1.0-x86_64.iso)
+   (~1.48 GB) — or build it yourself on Arch Linux with
+   `sudo ./iso/build.sh` (see `iso/README.md` for the details).
+   Write it to a USB stick with balenaEtcher or `dd`.
 2. Boot the USB stick. It logs in automatically and the graphical
    installer opens on the desktop.
 3. Click through it — language, disk, user — and install. Reboot,
    log in with SDDM, and the Simorgh desktop is ready. No terminal
    commands anywhere.
 
-> The ISO is new and **has not been built or booted yet** — this
-> machine has no Arch to build it on. Everything is validated by
-> reading only (see `iso/README.md`).
+> The ISO is published, but **installing from it is not fully
+> tested yet** — it boots to the live desktop, but the complete
+> graphical install + reboot into the installed system has not
+> been verified end-to-end (see `iso/README.md`).
 
 ### On an existing Arch install
 
@@ -349,19 +351,20 @@ wallpapers/             one 1920x1080 PNG per theme (+ generate.py)
 CONTRIBUTING.md         how to contribute (themes, code, bug reports)
 LICENSE                 MIT
 .github/                issue templates (bug report, feature request)
+                        + GitHub Actions workflows (ISO build, release publish)
 ```
 
 ## Known limits
 
-- **Not tested on real Arch yet** — the installer has never actually
-  run here (no Arch/pacman on this machine); validation so far is
-  syntax, JSON, and smoke tests. A real Arch install (VM or hardware)
-  is the biggest remaining step.
+- **Not tested on real hardware yet** — the installer was tested in
+  Arch VMs (including a successful SDDM login), but no real machine
+  has run it yet; the Waybar/wallpaper rendering still needs
+  real-hardware confirmation.
 - **No README screenshots yet** — they need a live session.
-- **The ISO is unbuilt and untested.** `iso/` has the archiso
-  profile, the Calamares graphical installer, and the `simorgh-install`
-  console fallback, but no Arch machine has built or booted it yet.
-  The script method stays fully supported.
+- **Installing from the ISO is untested.** The ISO is published
+  (v1.0) and boots to the live desktop, but the full graphical
+  install + reboot into the installed system has not been verified
+  end-to-end. The script method stays fully supported.
 - **No light theme** — all six themes are dark and glassy.
 - CJK (Chinese/Japanese/Korean) fonts are not preinstalled; install
   `noto-fonts-cjk` from the menu if you need them.
