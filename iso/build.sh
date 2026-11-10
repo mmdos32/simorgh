@@ -37,7 +37,9 @@ if ! ls "$LOCAL_REPO"/calamares-*.pkg.tar.zst >/dev/null 2>&1; then
     tmp="$(mktemp -d)"
     git clone --depth 1 https://aur.archlinux.org/calamares.git "$tmp/calamares"
     (cd "$tmp/calamares" && makepkg -s --noconfirm)
-    cp "$tmp"/calamares-*.pkg.tar.zst "$1/"
+    # makepkg writes the packages into the build dir ($tmp/calamares),
+    # not $tmp. [0-9] skips the calamares-debug split package.
+    cp "$tmp"/calamares/calamares-[0-9]*.pkg.tar.zst "$1/"
     rm -rf "$tmp"
   ' _ "$LOCAL_REPO"
   (cd "$LOCAL_REPO" && sudo -u "$BUILD_USER" -- repo-add simorgh.db.tar.gz calamares-*.pkg.tar.zst)
