@@ -9,7 +9,7 @@ the script is for people who already have Arch.
 ### From the ISO (recommended — but the install-through is still untested; see the note below)
 
 1. Download the ISO from the [v1.0 release](https://github.com/mmdos32/simorgh/releases/download/v1.0/simorgh-1.0-x86_64.iso)
-   (~1.48 GB) — or build it yourself on Arch Linux with
+   (~1.5 GB) — or build it yourself on Arch Linux with
    `sudo ./iso/build.sh` (see `iso/README.md` for the details).
    Write it to a USB stick with balenaEtcher or `dd`.
 2. Boot the USB stick. It logs in automatically and the graphical

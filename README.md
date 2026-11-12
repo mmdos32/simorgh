@@ -13,7 +13,7 @@ programming, gaming, and daily use.
 Get the latest release — **v1.0** — from the
 [Releases page](https://github.com/mmdos32/simorgh/releases):
 
-[simorgh-1.0-x86_64.iso](https://github.com/mmdos32/simorgh/releases/download/v1.0/simorgh-1.0-x86_64.iso) (~1.48 GB)
+[simorgh-1.0-x86_64.iso](https://github.com/mmdos32/simorgh/releases/download/v1.0/simorgh-1.0-x86_64.iso) (~1.5 GB)
 
 ## Install
 

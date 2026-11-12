@@ -40,11 +40,22 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
     permissions:
       contents: write # needed only by the release step
     steps:
+      - name: Preflight — check runner tools
+        # Fail closed if the runner image ever drops a tool this
+        # workflow relies on. Runs first, before any step that uses
+        # these tools, so a missing tool fails fast instead of
+        # mid-build. `gh` is preinstalled by convention, not by any
+        # in-repo contract, and `runs-on` is pinned below so the
+        # image cannot drift silently.
+        run: |
+          command -v docker gh curl git sudo sha256sum grep awk wc chown id df ls mv rm cat || exit 1
+          echo test | grep -qP 'test' || { echo "grep -P (PCRE) support is required (grep -oP is used below)" >&2; exit 1; }
+
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/hostedtoolcache /usr/local/lib/android /opt/ghc /usr/local/share/boost

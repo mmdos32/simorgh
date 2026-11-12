@@ -8,6 +8,17 @@ set -euo pipefail
 [[ -f /etc/arch-release ]] || { echo "Build on Arch Linux." >&2; exit 1; }
 command -v mkarchiso >/dev/null || { echo "archiso is required: sudo pacman -S archiso" >&2; exit 1; }
 command -v python3 >/dev/null || { echo "python3 is required (Arch package 'python'): sudo pacman -S python" >&2; exit 1; }
+# Fail closed if any other tool this script invokes is missing: the
+# workflow container installs only archiso, git, sudo and python, and
+# the rest is assumed from the archlinux:base-devel image. (useradd is
+# invoked by the workflow's container step before this script runs;
+# checking it here is belt-and-braces. repo-add is not checked: it is
+# self-healing via the pacman-contrib fallback below.)
+for tool in useradd flock bsdtar makepkg tar sed grep mktemp chown cp mv ls head cat rm mkdir pacman sudo git dirname; do
+  command -v "$tool" >/dev/null || { echo "$tool is required to build the ISO." >&2; exit 1; }
+done
+# grep -oP (PCRE) is used below to parse iso_version.
+echo test | grep -qP 'test' >/dev/null || { echo "grep -P (PCRE) support is required." >&2; exit 1; }
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # The build runs as root (via sudo) on a checkout owned by another

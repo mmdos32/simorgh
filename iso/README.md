@@ -65,7 +65,7 @@ cached package. The repo directory is gitignored.
 ## What this ISO is — and isn't
 
 - **Installing from it is still untested.** The ISO is published
-  as v1.0 (`simorgh-1.0-x86_64.iso`, ~1.48 GB, built by GitHub
+  as v1.0 (`simorgh-1.0-x86_64.iso`, ~1.5 GB, built by GitHub
   Actions) and boots to the live Hyprland desktop, with Calamares
   starting — but the full graphical install + reboot into the
   installed system has not been verified end-to-end. In the test

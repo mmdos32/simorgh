@@ -44,6 +44,17 @@ btrfs-progs
 xfsprogs
 # unsquashfs: unpackfs cannot unpack airootfs.sfs without it.
 squashfs-tools
+# rsync: Calamares unpackfs copies the mounted airootfs.sfs with
+# `rsync -aHAXSr`; without it the install fails with error 127.
+rsync
+# setxkbmap is the X11 fallback for the Calamares keyboard page.
+# (The layout-preview compiler is not an Arch package, so the preview
+# degrades to a logged warning on the Wayland live session, which
+# uses the locale1 D-Bus path instead.)
+xorg-setxkbmap
+# dbus: makes dbus-uuidgen available in the target for the Calamares
+# machineid step, instead of relying on a transitive dependency.
+dbus
 cryptsetup
 lvm2
 jq

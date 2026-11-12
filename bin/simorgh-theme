@@ -298,14 +298,22 @@ EOF
         # the running bar and fail to respawn it). restart_process
         # waits for the old PIDs to die first, so a slow-dying old bar
         # cannot masquerade as a successful respawn.
-        if ! restart_process waybar waybar; then
-          echo "Warning: Waybar did not restart after the theme change — run 'waybar' from a terminal to see the error." >&2
-          notify "Theme applied, but Waybar did not restart."
+        # Only restart a component that is already running: on the
+        # installer-only live session Waybar/hyprpaper are stripped,
+        # and restart_process would otherwise spawn them on a live
+        # theme switch (SUPER+T).
+        if pgrep -x waybar >/dev/null; then
+          if ! restart_process waybar waybar; then
+            echo "Warning: Waybar did not restart after the theme change — run 'waybar' from a terminal to see the error." >&2
+            notify "Theme applied, but Waybar did not restart."
+          fi
         fi
-        # Restart hyprpaper so the new wallpaper loads
-        if ! restart_process hyprpaper hyprpaper; then
-          echo "Warning: hyprpaper did not restart after the theme change — run 'hyprpaper' from a terminal to see the error." >&2
-          notify "Theme applied, but hyprpaper did not restart."
+        # Restart hyprpaper so the new wallpaper loads (only if running)
+        if pgrep -x hyprpaper >/dev/null; then
+          if ! restart_process hyprpaper hyprpaper; then
+            echo "Warning: hyprpaper did not restart after the theme change — run 'hyprpaper' from a terminal to see the error." >&2
+            notify "Theme applied, but hyprpaper did not restart."
+          fi
         fi
         # Reload SwayNC so the new notification theme applies — it does
         # not hot-reload its style file on its own. Only inside a

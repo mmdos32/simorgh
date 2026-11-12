@@ -43,7 +43,14 @@ echo "Updating Simorgh from $REPO ..."
 # The origin must be github.com/mmdos32/simorgh: a bare mmdos32/simorgh
 # substring would also match an attacker's host.
 remote="$(git -C "$REPO" remote get-url origin 2>/dev/null || true)"
-if [[ -n "$remote" && ! "$remote" =~ (^|[@/])github\.com[:/]mmdos32/simorgh(\.git)?$ ]]; then
+# Normalise before matching: git stores the origin verbatim, so a clone
+# made with a trailing slash (`.../simorgh/`) or a capitalised host
+# (`GitHub.com`, same host per DNS) is the same repo — strip trailing
+# slashes and compare lowercased. $remote itself is kept unchanged so
+# the error message shows the real origin.
+remote_norm="${remote,,}"
+while [[ "$remote_norm" == */ ]]; do remote_norm="${remote_norm%/}"; done
+if [[ -n "$remote_norm" && ! "$remote_norm" =~ (^|[@/])github\.com[:/]mmdos32/simorgh(\.git)?$ ]]; then
   echo "simorgh-update: $REPO is not the Simorgh repo (origin: $remote)." >&2
   echo "Set SIMORGH_REPO to the right clone and try again." >&2
   exit 1

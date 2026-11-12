@@ -61,7 +61,12 @@ EOF
 if command -v rofi >/dev/null; then
   # A rofi that exists but fails (no display, killed) used to abort
   # under `set -e` with no message — say so instead of exiting silently.
-  list | rofi -dmenu -p "Simorgh keybinds — type to search" -i || notify-send "Simorgh" "Could not show the shortcuts guide." 2>/dev/null || true
+  # rofi exit 1 is "user cancelled" (Esc) — the documented way to close
+  # the guide — not a failure, so only notify on other non-zero codes.
+  # `rc=$?` is the first command of the brace group, so it reads the
+  # pipeline status before anything else runs; the trailing `|| true`
+  # keeps the group at exit 0 so `set -e` can never abort here.
+  list | rofi -dmenu -p "Simorgh keybinds — type to search" -i || { rc=$?; [[ $rc -ne 1 ]] && notify-send "Simorgh" "Could not show the shortcuts guide." 2>/dev/null || true; }
 else
   # SUPER+K opens this with no terminal visible, so a bare stdout dump
   # would never be seen — show the list in a kitty window (less to
