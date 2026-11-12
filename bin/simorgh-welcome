@@ -7,14 +7,18 @@ set -euo pipefail
 
 FLAG="$HOME/.local/share/simorgh/.first-run-done"
 [[ -f "$FLAG" ]] && exit 0
-mkdir -p "$HOME/.local/share/simorgh"
-touch "$FLAG"
+# The flag dir is essential — without it the welcome repeats every
+# login. Fail loudly instead of aborting silently under `set -e`.
+mkdir -p "$HOME/.local/share/simorgh" || {
+  echo "simorgh-welcome: could not create $HOME/.local/share/simorgh." >&2
+  exit 1
+}
 
 if ! command -v kitty >/dev/null; then
   command -v notify-send >/dev/null && notify-send "Simorgh" "Welcome to Simorgh — press SUPER + K for the shortcuts guide." 2>/dev/null || true
+  touch "$FLAG"
   exit 0
 fi
-
 kitty --class simorgh-welcome -e bash -c '
 cat << "EOF"
 
@@ -42,3 +46,21 @@ EOF
 echo
 read -n1 -s -r -p "   Press any key to close…"
 ' &
+kitty_pid=$!
+# Only mark the welcome as shown once it was actually displayed:
+# flagging on a single 0.5s liveness check raced both ways — a
+# window closed within 0.5s left the flag unset (welcome repeated
+# next login), while a kitty that died just after 0.5s still set it
+# though nothing was shown. So wait (bounded, ~5s max, so a stuck
+# kitty cannot block login) for the window to close, and flag it
+# only if kitty lived at least ~0.2s — long enough to really show.
+# If it is still open after ~5s, it was shown; flag it and return
+# without waiting for the keypress.
+elapsed=0
+while kill -0 "$kitty_pid" 2>/dev/null && [[ $elapsed -lt 50 ]]; do
+  sleep 0.1
+  elapsed=$((elapsed + 1))
+done
+# A kitty that dies within ~0.2s never really launched (failed spawn),
+# so the welcome must repeat next login; anything longer was shown.
+if [[ $elapsed -ge 2 ]]; then touch "$FLAG"; fi

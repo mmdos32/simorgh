@@ -24,23 +24,140 @@ list_themes() {
   find "$THEMES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
 }
 
+# pid_alive <pid> — true when the process is really running. A plain
+# `kill -0` also succeeds on zombies, so a stale zombie in the old set
+# would spin restart_process's wait loops to their full time and look
+# like a surviving old process. State Z (from /proc/<pid>/stat, parsed
+# past the parenthesised comm) does not count as alive.
+pid_alive() {
+  local pid="$1" stat state
+  kill -0 "$pid" 2>/dev/null || return 1
+  stat="$(cat "/proc/$pid/stat" 2>/dev/null || true)"
+  [[ -n "$stat" ]] || return 1
+  state="${stat##*) }"
+  state="${state%% *}"
+  [[ "$state" != "Z" ]]
+}
+
+# restart_process <name> <command...> — kill the old process, wait
+# (bounded, ~1s) until its PIDs are actually gone, respawn, and
+# succeed only when a PID not in the old set is alive. A bare
+# pkill/sleep/pgrep check cannot tell a stale, slow-dying old
+# process from a fresh respawn — a failed respawn used to pass.
+restart_process() {
+  local name="$1"; shift
+  local user="${USER:-$(id -un)}"
+  local old_pids pid alive i
+  old_pids="$(pgrep -u "$user" -x "$name" 2>/dev/null || true)"
+  pkill -u "$user" -x "$name" 2>/dev/null || true
+  for i in $(seq 1 10); do
+    alive=0
+    for pid in $old_pids; do
+      if pid_alive "$pid"; then alive=1; break; fi
+    done
+    [[ "$alive" -eq 0 ]] && break
+    sleep 0.1
+  done
+  # Escalate to SIGKILL: a TERM-ignoring old process would otherwise
+  # survive alongside the respawn (duplicate bars, reported success).
+  for pid in $old_pids; do
+    if pid_alive "$pid"; then kill -KILL "$pid" 2>/dev/null || true; fi
+  done
+  for i in $(seq 1 5); do
+    alive=0
+    for pid in $old_pids; do
+      if pid_alive "$pid"; then alive=1; break; fi
+    done
+    [[ "$alive" -eq 0 ]] && break
+    sleep 0.1
+  done
+  # A D-state old process can survive SIGKILL: spawning now would
+  # leave a duplicate alongside the respawn while reporting success.
+  # Refuse to spawn instead.
+  for pid in $old_pids; do
+    if pid_alive "$pid"; then return 1; fi
+  done
+  ("$@" >/dev/null 2>&1 &) || true
+  # Poll for a PID that is not in the old set: a single snapshot after
+  # 0.3s missed a slow-starting respawn (it appeared at ~0.8s) and
+  # wrongly reported "did not restart".
+  for i in $(seq 1 20); do
+    for pid in $(pgrep -u "$user" -x "$name" 2>/dev/null || true); do
+      case " $old_pids " in
+        *" $pid "*) ;;
+        *)
+          # A respawn that lives ~0.3s and exits would pass a single
+          # sighting with no bar left afterwards — re-check liveness
+          # after a short pause before calling it a success.
+          sleep 0.2
+          if kill -0 "$pid" 2>/dev/null; then return 0; fi
+          ;;
+      esac
+    done
+    sleep 0.1
+  done
+  return 1
+}
+
 apply_theme() {
   local name="$1"
   local dir="$THEMES_DIR/$name"
   [[ -d "$dir" ]] || { echo "Unknown theme: $name" >&2; list_themes >&2; exit 1; }
 
-  mkdir -p "$CONFIG/hypr/themes" "$CONFIG/waybar" "$CONFIG/rofi" "$CONFIG/kitty" "$CONFIG/swaync"
+  # Validate every required theme file before copying anything: a
+  # half-applied theme (Hyprland reloaded, Waybar still on old colors)
+  # used to happen when a later cp failed.
+  local missing=()
+  local f
+  for f in hyprland.lua waybar.css rofi.rasi kitty.conf swaync.css; do
+    [[ -f "$dir/$f" ]] || missing+=("$f")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Theme '$name' is incomplete — missing: ${missing[*]}" >&2
+    exit 1
+  fi
 
-  # Hyprland theme snippet (loaded by hyprland.lua via require("themes.active"))
-  cp "$dir/hyprland.lua" "$CONFIG/hypr/themes/active.lua"
-  # Waybar colors
-  cp "$dir/waybar.css" "$CONFIG/waybar/theme.css"
-  # Rofi colors
-  cp "$dir/rofi.rasi" "$CONFIG/rofi/theme.rasi"
-  # Kitty colors
-  cp "$dir/kitty.conf" "$CONFIG/kitty/theme.conf"
-  # SwayNC colors (so notifications match the theme too)
-  [[ -f "$dir/swaync.css" ]] && cp "$dir/swaync.css" "$CONFIG/swaync/style.css"
+  # The theme dirs are essential — without them every cp below
+  # fails. Fail loudly instead of aborting silently under `set -e`.
+  mkdir -p "$CONFIG/hypr/themes" "$CONFIG/waybar" "$CONFIG/rofi" "$CONFIG/kitty" "$CONFIG/swaync" || {
+    echo "Theme '$name' failed to apply — could not create the config directories." >&2
+    exit 1
+  }
+
+  # Stage every file as a temp file in its destination, then rename
+  # into place: a failure mid-sequence used to leave mixed old/new
+  # theme files while `current` still named the old theme. Renames
+  # stay on the same filesystem, so each one is atomic; if any copy
+  # fails, the staged temps are removed and nothing changes.
+  local sfx=".tmp.$$"
+  cp "$dir/hyprland.lua" "$CONFIG/hypr/themes/active.lua$sfx" &&
+  cp "$dir/waybar.css" "$CONFIG/waybar/theme.css$sfx" &&
+  cp "$dir/rofi.rasi" "$CONFIG/rofi/theme.rasi$sfx" &&
+  cp "$dir/kitty.conf" "$CONFIG/kitty/theme.conf$sfx" &&
+  cp "$dir/swaync.css" "$CONFIG/swaync/style.css$sfx" || {
+    rm -f "$CONFIG/hypr/themes/active.lua$sfx" "$CONFIG/waybar/theme.css$sfx" \
+      "$CONFIG/rofi/theme.rasi$sfx" "$CONFIG/kitty/theme.conf$sfx" \
+      "$CONFIG/swaync/style.css$sfx"
+    echo "Theme '$name' failed to apply — no theme files were changed." >&2
+    exit 1
+  }
+  # The renames are the commit point: if one fails, stop and say so
+  # instead of carrying on to reload a half-applied theme.
+  mv -T "$CONFIG/hypr/themes/active.lua$sfx" "$CONFIG/hypr/themes/active.lua" &&
+  mv -T "$CONFIG/waybar/theme.css$sfx" "$CONFIG/waybar/theme.css" &&
+  mv -T "$CONFIG/rofi/theme.rasi$sfx" "$CONFIG/rofi/theme.rasi" &&
+  mv -T "$CONFIG/kitty/theme.conf$sfx" "$CONFIG/kitty/theme.conf" &&
+  mv -T "$CONFIG/swaync/style.css$sfx" "$CONFIG/swaync/style.css" || {
+    # Remove whatever temps are left: a mid-chain failure used to
+    # leak the not-yet-renamed *.tmp.$$ files (unlike the cp-failure
+    # branch above, which cleans up). Temps already renamed are
+    # simply not there any more, so rm -f is safe here.
+    rm -f "$CONFIG/hypr/themes/active.lua$sfx" "$CONFIG/waybar/theme.css$sfx" \
+      "$CONFIG/rofi/theme.rasi$sfx" "$CONFIG/kitty/theme.conf$sfx" \
+      "$CONFIG/swaync/style.css$sfx"
+    echo "Theme '$name' failed to apply — some theme files may already have changed; re-run simorgh-theme to retry." >&2
+    exit 1
+  }
 
   # Wallpaper: from the theme's colors file (wallpaper=...), falling back
   # to <theme>.png. The default teal-glass theme points at the signature
@@ -48,28 +165,126 @@ apply_theme() {
   local wallpaper_file="$name.png"
   if [[ -f "$dir/colors" ]]; then
     local w
-    w="$(grep -E '^wallpaper=' "$dir/colors" | cut -d= -f2- | tr -d '[:space:]')"
+    w="$(grep -E '^[[:space:]]*wallpaper[[:space:]]*=' "$dir/colors" | cut -d= -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | head -n 1 || true)"
     [[ -n "$w" ]] && wallpaper_file="$w"
   fi
   local wallpaper="$SHARE_DIR/wallpapers/$wallpaper_file"
-  if [[ -f "$wallpaper" ]]; then
-    ln -sf "$wallpaper" "$CONFIG/hypr/wallpaper.png"
-    cat > "$CONFIG/hypr/hyprpaper.conf" <<EOF
+  local wallpaper_ok=1
+  local wallpaper_reason=""
+  # hyprlang treats `#` as a comment start and `;` as a value
+  # terminator, so a wallpaper name containing either would be
+  # written verbatim into hyprpaper.conf and hyprlock.conf yet
+  # parsed as a truncated path — while the `path = ...` check below
+  # still passed on the literal text. Reject such names up front
+  # and keep the previous wallpaper instead of writing a config
+  # that points at a path hyprlang will never load.
+  case "$wallpaper_file" in
+    *\#*|*\;*)
+      echo "Warning: wallpaper name '$wallpaper_file' contains '#' or ';', which hyprlang would truncate — keeping the previous wallpaper." >&2
+      notify "Theme '$name': wallpaper name contains '#' or ';' — keeping the previous wallpaper."
+      wallpaper_ok=0
+      wallpaper_reason="wallpaper name contains '#' or ';'"
+      ;;
+  esac
+  # Whether the lock-screen wallpaper was updated (set to 0 below
+  # when the hyprlock.conf edit fails): the theme may be fully
+  # applied while the lock screen still shows the old wallpaper, and
+  # that must not be reported as a plain "Theme applied".
+  local lock_ok=1
+  # Whether the `current` marker was recorded (set to 0 below when
+  # its write fails): the theme files may be applied while `current`
+  # still names the old theme, and that must not be reported as a
+  # plain "Theme applied".
+  local current_ok=1
+  if [[ "$wallpaper_ok" -eq 1 && -f "$wallpaper" ]]; then
+    # Guard the link: an unguarded ln failure used to abort the script
+    # under `set -e` with the theme files already moved and `current`
+    # still naming the old theme. A failed link marks the theme
+    # partly applied instead.
+    if ln -sf "$wallpaper" "$CONFIG/hypr/wallpaper.png"; then
+      # Stage hyprpaper.conf like the theme files above: a direct
+      # rewrite that fails leaves a half-written config behind.
+      # Write + rename as one guarded step: a failing redirect (e.g.
+      # read-only dir, full disk) used to abort under `set -e` with
+      # the theme files already moved.
+      if cat > "$CONFIG/hypr/hyprpaper.conf$sfx" <<EOF && mv -T "$CONFIG/hypr/hyprpaper.conf$sfx" "$CONFIG/hypr/hyprpaper.conf"; then
 # Simorgh — hyprpaper (wallpaper)
 # Regenerated by simorgh-theme for theme: $name
-preload = $wallpaper
-wallpaper = ,$wallpaper
+# splash/ipc are valid top-level options in hyprpaper 0.8 (only preload
+# and the flat wallpaper line are dead) — keep the splash text off.
 splash = false
 ipc = on
+wallpaper {
+    monitor = ;
+    path = $wallpaper;
+    fit_mode = cover;
+}
 EOF
-    # Lock screen wallpaper: absolute path (hyprlock may not expand ~).
-    if [[ -f "$CONFIG/hypr/hyprlock.conf" ]]; then
-      sed -i "s|^\(\s*path = \).*|\1$wallpaper|" "$CONFIG/hypr/hyprlock.conf" || true
+        : # written and renamed
+      else
+        rm -f "$CONFIG/hypr/hyprpaper.conf$sfx"
+        echo "Warning: could not write hyprpaper.conf for theme '$name' — keeping the previous wallpaper." >&2
+        notify "Theme '$name': wallpaper config could not be written — keeping the previous wallpaper."
+        wallpaper_ok=0
+        wallpaper_reason="wallpaper config could not be written"
+      fi
+      # Lock screen wallpaper: absolute path (hyprlock may not expand ~).
+      if [[ "$wallpaper_ok" -eq 1 && -f "$CONFIG/hypr/hyprlock.conf" ]]; then
+        # Escape the sed replacement: an `&` in the wallpaper name
+        # would expand to the whole matched line, a `\` would escape
+        # the next character, and a `|` would break the delimiter.
+        local wallpaper_esc="${wallpaper//\\/\\\\}"
+        wallpaper_esc="${wallpaper_esc//&/\\&}"
+        wallpaper_esc="${wallpaper_esc//|/\\|}"
+        sed -i "s|^\(\s*path = \).*|\1$wallpaper_esc|" "$CONFIG/hypr/hyprlock.conf" || true
+        # sed succeeds having changed nothing when there is no
+        # `path =` line — verify the new path is actually there, or
+        # the lock screen silently keeps the old wallpaper. The grep
+        # alone cannot catch a `#`/`;` in the name: the file holds
+        # the full literal text while hyprlang truncates it at the
+        # first `#`/`;`, so fail the check on such a name too.
+        if [[ "$wallpaper" == *"#"* || "$wallpaper" == *";"* ]] || ! grep -qF "path = $wallpaper" "$CONFIG/hypr/hyprlock.conf"; then
+          echo "Warning: could not update the lock-screen wallpaper in hyprlock.conf for theme '$name' — keeping the previous lock-screen wallpaper." >&2
+          notify "Theme '$name': lock-screen wallpaper could not be updated."
+          lock_ok=0
+        fi
+      elif [[ "$wallpaper_ok" -eq 1 ]] && command -v hyprlock >/dev/null; then
+        # hyprlock is installed but its config is missing, so the
+        # lock-screen wallpaper was never updated — that must not
+        # report as a plain "Theme applied".
+        echo "Warning: hyprlock is installed but hyprlock.conf is missing — the lock-screen wallpaper was not updated for theme '$name'." >&2
+        notify "Theme '$name': lock-screen wallpaper could not be updated (hyprlock.conf missing)."
+        lock_ok=0
+      fi
+    else
+      echo "Warning: could not link the wallpaper for theme '$name' ($wallpaper) — keeping the previous wallpaper." >&2
+      notify "Theme '$name': wallpaper could not be linked — keeping the previous wallpaper."
+      wallpaper_ok=0
+      wallpaper_reason="wallpaper could not be linked"
     fi
+  elif [[ "$wallpaper_ok" -eq 1 ]]; then
+    # Warn loudly instead of skipping silently: the old wallpaper
+    # stays behind, and the theme would otherwise be recorded as
+    # current even though it never fully applied.
+    echo "Warning: wallpaper for theme '$name' is missing: $wallpaper — keeping the previous wallpaper." >&2
+    notify "Theme '$name': wallpaper is missing ($wallpaper_file) — keeping the previous wallpaper."
+    wallpaper_ok=0
+    wallpaper_reason="wallpaper missing ($wallpaper_file)"
   fi
 
-  # Remember the active theme
-  echo "$name" > "$CONFIG/hypr/themes/current"
+  # Remember the active theme — but only when it applied fully.
+  # With a missing wallpaper the marker is left on the previous
+  # theme, so a later re-run (simorgh-update) restores that one
+  # instead of re-applying a theme whose wallpaper never loaded.
+  if [[ "$wallpaper_ok" -eq 1 ]]; then
+    # Staged like the theme files: a failed write must leave the old
+    # marker in place rather than an empty/truncated `current`.
+    echo "$name" > "$CONFIG/hypr/themes/current$sfx" && mv -T "$CONFIG/hypr/themes/current$sfx" "$CONFIG/hypr/themes/current" || {
+      rm -f "$CONFIG/hypr/themes/current$sfx"
+      echo "Warning: could not record the active theme — theme files applied, but 'current' still names the previous theme." >&2
+      current_ok=0
+    }
+  fi
 
   # Reload the live session (only when Hyprland is actually running)
   if command -v hyprctl >/dev/null && [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
@@ -78,23 +293,54 @@ EOF
     # session — without WAYLAND_DISPLAY the restart would silently kill
     # the running bar and fail to respawn it).
     if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-        pkill waybar 2>/dev/null || true
-        sleep 0.3
-        (waybar >/dev/null 2>&1 &) || true
+        # Restart Waybar so the new colors apply (only inside a graphical
+        # session — without WAYLAND_DISPLAY the restart would silently kill
+        # the running bar and fail to respawn it). restart_process
+        # waits for the old PIDs to die first, so a slow-dying old bar
+        # cannot masquerade as a successful respawn.
+        if ! restart_process waybar waybar; then
+          echo "Warning: Waybar did not restart after the theme change — run 'waybar' from a terminal to see the error." >&2
+          notify "Theme applied, but Waybar did not restart."
+        fi
         # Restart hyprpaper so the new wallpaper loads
-        pkill hyprpaper 2>/dev/null || true
-        sleep 0.3
-        (hyprpaper >/dev/null 2>&1 &) || true
+        if ! restart_process hyprpaper hyprpaper; then
+          echo "Warning: hyprpaper did not restart after the theme change — run 'hyprpaper' from a terminal to see the error." >&2
+          notify "Theme applied, but hyprpaper did not restart."
+        fi
+        # Reload SwayNC so the new notification theme applies — it does
+        # not hot-reload its style file on its own. Only inside a
+        # graphical session: without WAYLAND_DISPLAY this call fails.
+        swaync-client -rs 2>/dev/null || true
     else
         echo "Note: WAYLAND_DISPLAY is not set — Waybar/hyprpaper left running; restart them from inside Hyprland if needed." >&2
     fi
-    # Reload SwayNC so the new notification theme applies — it does not
-    # hot-reload its style file on its own.
-    swaync-client -rs 2>/dev/null || true
   fi
 
-  echo "Theme applied: $name"
-  notify "Theme applied: $name"
+  if [[ "$wallpaper_ok" -eq 1 ]]; then
+    # Compose the verdict from all three flags: the old if/elif
+    # chain reported only "not recorded" when current_ok failed,
+    # swallowing a simultaneous lock failure.
+    local verdict="Theme applied"
+    local detail=""
+    if [[ "$current_ok" -eq 0 ]]; then
+      verdict="$verdict but not recorded"
+      detail="theme files applied, but 'current' still names the previous theme"
+    fi
+    if [[ "$lock_ok" -eq 0 ]]; then
+      verdict="$verdict, lock-screen wallpaper not updated"
+      detail="${detail:+$detail; }lock-screen wallpaper not updated"
+    fi
+    if [[ -n "$detail" ]]; then
+      echo "$verdict: $name ($detail)"
+      notify "$verdict: $name."
+    else
+      echo "$verdict: $name"
+      notify "$verdict: $name"
+    fi
+  else
+    echo "Theme partly applied: $name ($wallpaper_reason — keeping the previous wallpaper)"
+    notify "Theme partly applied: $name — $wallpaper_reason."
+  fi
 }
 
 if [[ $# -ge 1 ]]; then
@@ -109,6 +355,8 @@ if command -v rofi >/dev/null; then
 else
   echo "Available themes:"
   list_themes
-  read -rp "Theme [$DEFAULT_THEME]: " choice
+  # `|| true`: with stdin closed/EOF, read fails — under `set -e`
+  # that used to abort without applying any theme.
+  read -rp "Theme [$DEFAULT_THEME]: " choice || true
   apply_theme "${choice:-$DEFAULT_THEME}"
 fi

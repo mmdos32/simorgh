@@ -32,7 +32,7 @@ SUPER + SHIFT + Tab — Previous window
 SUPER + grave (`) — Scratchpad terminal
 SUPER + R — Resize mode (arrows to resize, Esc to exit)
 SUPER + arrows — Move focus
-SUPER + CTRL + left/right — Focus monitor (multi-monitor)
+SUPER + CTRL + arrows — Focus monitor (multi-monitor)
 SUPER + SHIFT + arrows — Move window
 SUPER + 1..0 — Switch workspace
 SUPER + SHIFT + 1..0 — Move window to workspace
@@ -54,11 +54,48 @@ XF86MonBrightnessUp / Down — Brightness
 XF86AudioPlay / Next / Prev — Media playback
 SUPER + mouse drag — Move / resize window
 SUPER + mouse wheel — Switch workspace
+3-finger horizontal swipe — Switch workspace
 EOF
 }
 
 if command -v rofi >/dev/null; then
-  list | rofi -dmenu -p "Simorgh keybinds — type to search" -i
+  # A rofi that exists but fails (no display, killed) used to abort
+  # under `set -e` with no message — say so instead of exiting silently.
+  list | rofi -dmenu -p "Simorgh keybinds — type to search" -i || notify-send "Simorgh" "Could not show the shortcuts guide." 2>/dev/null || true
 else
-  list
+  # SUPER+K opens this with no terminal visible, so a bare stdout dump
+  # would never be seen — show the list in a kitty window (less to
+  # search/scroll) instead. The temp file is removed when less exits.
+  if command -v kitty >/dev/null; then
+    # The temp file is essential to showing the guide in kitty —
+    # fail loudly instead of aborting silently under `set -e`.
+    tmp="$(mktemp)" || { echo "simorgh-keybinds: could not create a temp file for the shortcuts guide." >&2; exit 1; }
+    list > "$tmp" || { echo "simorgh-keybinds: could not write the shortcuts guide to $tmp." >&2; rm -f "$tmp"; exit 1; }
+    kitty -e bash -c 'less "$1"; rm -f "$1"' _ "$tmp" &
+    kitty_pid=$!
+    # If kitty fails to spawn (e.g. no display), the temp file would
+    # leak — its rm only runs inside kitty's bash — so check the spawn
+    # and clean up. The "showing the guide" notice goes only after the
+    # spawn check: on failure the user used to get that notice followed
+    # by the contradictory "could not open a terminal" one.
+    # 0.5s, matching simorgh-menu's spawn check: a kitty that dies
+    # just after 0.2s used to be reported as shown with nothing
+    # appearing. Still a heuristic — it can die later still.
+    sleep 0.5
+    if ! kill -0 "$kitty_pid" 2>/dev/null; then
+      rm -f "$tmp"
+      if command -v notify-send >/dev/null; then
+        notify-send "Simorgh" "Could not open a terminal to show the shortcuts guide." 2>/dev/null || true
+      fi
+    else
+      if command -v notify-send >/dev/null; then
+        notify-send "Simorgh" "rofi is not installed — showing the shortcuts guide in a terminal instead." 2>/dev/null || true
+      fi
+    fi
+  else
+    if command -v notify-send >/dev/null; then
+      notify-send "Simorgh" "rofi is not installed — cannot show the shortcuts guide." 2>/dev/null || true
+    fi
+    list
+  fi
 fi

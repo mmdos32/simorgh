@@ -46,9 +46,6 @@ obs-studio
 # Password manager
 keepassxc
 
-# Bluetooth
-blueman
-
 # Calculator
 gnome-calculator
 
@@ -56,10 +53,10 @@ gnome-calculator
 tmux
 
 # --- Dev tools (menu: simorgh-menu -> Dev Tools) ---
-# None of these are preinstalled; install what you need.
-# C/C++ toolchain
-gcc
-make
+# gcc, make, python and nodejs are already preinstalled (gcc/make via
+# base-devel in packages/pacman.txt), so they are not listed here; only
+# the tools below are installed from the menu.
+# C/C++ toolchain (adds gdb)
 gdb
 # Python (python + nodejs are already installed by default — see
 # packages/pacman.txt — so they are not listed again here)

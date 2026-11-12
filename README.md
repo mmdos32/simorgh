@@ -17,7 +17,7 @@ Get the latest release — **v1.0** — from the
 
 ## Install
 
-**From the ISO (recommended):** download the ISO above, write it to a USB
+**From the ISO (recommended download — the install-through itself is still untested, see below):** download the ISO above, write it to a USB
 stick with balenaEtcher or `dd`, boot it, and the graphical installer
 opens on the desktop. See [the full install guide](manual/01-install.md)
 and [`iso/README.md`](iso/README.md).
@@ -68,7 +68,7 @@ The manual lives in [`manual/`](manual/), which is its authoritative source.
   Persian, German, French, Spanish, Arabic, Turkish, Russian, Chinese,
   Japanese, Portuguese also offered)
 - **Programming-first, gaming-ready**: dev tools one click away in the
-  menu (nothing preinstalled), and Steam / Heroic / Lutris one click
+  menu (gcc, make, Python and Node.js preinstalled, the rest one click away), and Steam / Heroic / Lutris one click
   away too
 - **Self-updating**: `simorgh-update` pulls the latest Simorgh and
   re-runs the installer
@@ -86,9 +86,9 @@ The manual lives in [`manual/`](manual/), which is its authoritative source.
   (v1.0) and boots to the live desktop, but the full graphical
   install + reboot into the installed system has not been verified
   end-to-end. The script method stays fully supported.
-- **No light theme** — all six themes are dark and glassy.
+- **No light desktop theme** — all six themes are dark and glassy (the installer itself uses a light theme).
 - CJK (Chinese/Japanese/Korean) fonts are not preinstalled; install
-  `noto-fonts-cjk` from the menu if you need them.
+  them with `sudo pacman -S noto-fonts-cjk` if you need them.
 
 ## License
 

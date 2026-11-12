@@ -1,0 +1,5 @@
+Simorgh live installer
+
+Console login: liveuser / live
+Text console: Ctrl+Alt+F3 (graphical session is on Ctrl+Alt+F2)
+Console installer: sudo simorgh-install

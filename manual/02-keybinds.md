@@ -16,7 +16,7 @@
 | `SUPER + K` | This shortcuts guide |
 | SUPER + ` (grave key) | Scratchpad terminal |
 | `SUPER + SHIFT + E` | Power menu (lock/logout/suspend/reboot/power off) |
-| `SUPER + Q` | Close window |
+| `SUPER + Q` | Close window (force-kill, SIGKILL) |
 | `SUPER + SHIFT + Q` | Exit Hyprland |
 | `SUPER + Tab` / `SUPER + SHIFT + Tab` | Switch to next / previous window |
 | `SUPER + F` | Fullscreen |
@@ -50,6 +50,9 @@
 | `XF86AudioPlay` / `Next` / `Prev` | Media playback |
 | `SUPER + mouse drag` | Move / resize window |
 | `SUPER + mouse wheel` | Switch workspace |
+| 3-finger horizontal swipe | Switch workspace |
 
 Press `SUPER + K` any time for the searchable shortcuts guide (`simorgh-keybinds`, also in the Simorgh menu under Keybinds).
+
+> Live session only (installer ISO): the live session adds `SUPER + W` (Wi-Fi via nmtui) and `SUPER + I` (reopen the installer).
 

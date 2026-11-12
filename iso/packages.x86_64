@@ -15,6 +15,14 @@ mkinitcpio-nfs-utils
 linux-firmware
 # Bootloader (required by mkarchiso profile validation)
 syslinux
+# grub + efibootmgr: the Calamares bootloader step runs BEFORE the
+# packages step, so they must already be in the live image.
+grub
+efibootmgr
+# os-prober + ntfs-3g: let GRUB detect other OSes (e.g. Windows) for
+# dual-boot; ntfs-3g is what lets os-prober read Windows partitions.
+os-prober
+ntfs-3g
 memtest86+
 memtest86+-efi
 edk2-shell
@@ -26,9 +34,16 @@ curl
 sudo
 networkmanager
 nano
+less
 parted
 dosfstools
 e2fsprogs
+# Filesystems the Calamares partition UI offers; their mkfs tools must be
+# in the live image or formatting fails.
+btrfs-progs
+xfsprogs
+# unsquashfs: unpackfs cannot unpack airootfs.sfs without it.
+squashfs-tools
 cryptsetup
 lvm2
 jq
@@ -46,11 +61,17 @@ kitty
 sddm
 swaync
 hyprpaper
+hyprlock
+hypridle
 hyprpolkitagent
 xdg-desktop-portal-hyprland
 qt6-wayland
 pipewire
 wireplumber
+# PulseAudio/ALSA compat layers: the live Waybar pulseaudio module and
+# pavucontrol are dead without them.
+pipewire-pulse
+pipewire-alsa
 zsh
 zsh-autosuggestions
 zsh-syntax-highlighting
@@ -58,9 +79,12 @@ starship
 noto-fonts
 noto-fonts-emoji
 ttf-jetbrains-mono-nerd
+inter-font
 libnotify
 dconf
 wl-clipboard
+# hyprland.lua runs `wl-paste --watch cliphist store`.
+cliphist
 grim
 slurp
 brightnessctl

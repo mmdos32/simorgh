@@ -4,20 +4,96 @@
 # Second press: stops and saves to ~/Videos/Simorgh.
 set -euo pipefail
 
-OUT="$HOME/Videos/Simorgh"
-mkdir -p "$OUT"
-
 notify() {
   command -v notify-send >/dev/null && notify-send "Simorgh" "$*" 2>/dev/null || true
 }
 
-if pgrep -x wf-recorder >/dev/null; then
-  pkill -INT -x wf-recorder
-  notify "Recording stopped — saved to $OUT"
+OUT="$HOME/Videos/Simorgh"
+# Guarded: an unguarded mkdir here used to abort the script silently
+# under `set -e` (e.g. a full disk) with no notification at all.
+mkdir -p "$OUT" || { notify "Could not create $OUT — cannot record."; echo "simorgh-record: could not create $OUT." >&2; exit 1; }
+
+if pgrep -u "$(id -un)" -x wf-recorder >/dev/null; then
+  # Snapshot the newest mp4 + its mtime BEFORE stopping: a stale old
+  # file must not be claimed as this recording's output when
+  # wf-recorder exits without finalising a new one (encoder error,
+  # bad region) — the newest file in the dir is then the old one.
+  before="$(ls -t "$OUT"/*.mp4 2>/dev/null | head -n 1 || true)"
+  before_mtime=""
+  before_size=0
+  # Nanosecond mtime (stat -c %y, lexicographically comparable) plus
+  # size: a whole-second %Y snapshot is essentially the snapshot
+  # second, and SIGINT finalisation usually lands in that same
+  # second — so a same-second stop used to report "no recording file
+  # was saved" for a perfectly good recording. Accept when the file
+  # grew OR its nanosecond mtime is newer.
+  if [[ -n "$before" ]]; then
+    before_mtime="$(stat -c %y "$before" 2>/dev/null || true)"
+    before_size="$(stat -c %s "$before" 2>/dev/null || echo 0)"
+  fi
+  # `|| true`: if the recorder exits on its own between the pgrep
+  # check above and this pkill, a bare pkill fails and aborts the
+  # script under `set -e` before any notification.
+  pkill -INT -u "$(id -un)" -x wf-recorder || true
+  # wf-recorder only finalises the file after SIGINT — wait for it to
+  # actually exit before claiming the recording is saved, or the user
+  # opens a half-written mp4.
+  for i in $(seq 1 50); do
+    pgrep -u "$(id -un)" -x wf-recorder >/dev/null || break
+    sleep 0.1
+  done
+  if pgrep -u "$(id -un)" -x wf-recorder >/dev/null; then
+    notify "Recording is still stopping — check $OUT in a moment."
+  else
+    # Only claim the recording was saved when a non-empty mp4 actually
+    # exists: wf-recorder can exit without finalising a file (encoder
+    # error, bad region), and the old message claimed success anyway.
+    # `|| true`: with no mp4 at all, ls fails — under `set -euo
+    # pipefail` that used to abort the script silently instead of
+    # reporting the missing file.
+    # And it must be THIS recording's file, not a stale one: accept
+    # only a file that did not exist before the stop, or whose mtime
+    # is newer than the previous newest file's (a new recording
+    # reusing the same timestamped name still has a newer mtime).
+    newest="$(ls -t "$OUT"/*.mp4 2>/dev/null | head -n 1 || true)"
+    newest_mtime=""
+    newest_size=0
+    if [[ -n "$newest" ]]; then
+      newest_mtime="$(stat -c %y "$newest" 2>/dev/null || true)"
+      newest_size="$(stat -c %s "$newest" 2>/dev/null || echo 0)"
+    fi
+    is_new=0
+    [[ "$newest" != "$before" ]] && is_new=1
+    [[ -n "$newest_mtime" && -n "$before_mtime" && "$newest_mtime" > "$before_mtime" ]] && is_new=1
+    [[ "$newest_size" -gt "$before_size" ]] && is_new=1
+    if [[ -n "$newest" && -s "$newest" && "$is_new" -eq 1 ]]; then
+      notify "Recording stopped — saved to $newest"
+    else
+      notify "Recording stopped but no recording file was saved in $OUT"
+    fi
+  fi
   exit 0
 fi
+
+command -v wf-recorder >/dev/null || { notify "wf-recorder is not installed — cannot record."; echo "simorgh-record: wf-recorder is not installed." >&2; exit 1; }
+command -v slurp >/dev/null || { notify "slurp is not installed — cannot pick a recording region."; echo "simorgh-record: slurp is not installed." >&2; exit 1; }
 
 region="$(slurp)" || exit 0
 file="$OUT/$(date +%Y-%m-%d_%H-%M-%S).mp4"
 wf-recorder -g "$region" -f "$file" &
-notify "Recording started"
+rec_pid=$!
+sleep 0.5
+if ! kill -0 "$rec_pid" 2>/dev/null; then
+  notify "Recording failed to start."
+  exit 1
+fi
+# A process alive at 0.5s can still die seconds later (bad region,
+# encoder error) and still report "Recording started" — re-check
+# after ~2s before claiming success.
+sleep 1.5
+if kill -0 "$rec_pid" 2>/dev/null; then
+  notify "Recording started"
+else
+  notify "Recording failed to start."
+  exit 1
+fi

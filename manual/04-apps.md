@@ -7,16 +7,16 @@
 |----------------|--------------------------------------|--------------------------------------------------|
 | Browser        | Chromium                             | Firefox, Brave, Zen Browser                      |
 | Terminal       | Kitty                                | Alacritty, Ghostty, Foot                         |
-| Editor         | VS Code                              | Neovim, Zed, VSCodium                            |
+| Editor         | VS Code                              | Zed, VSCodium (Neovim is already preinstalled)   |
 | File manager   | Maia                                 | Dolphin, Thunar, Nautilus                        |
 | Music          | Sung (YouTube Music + local files + synced lyrics) | Spotify, SoundCloud (Chromium web app), Amberol, Rhythmbox |
 | Video          | VLC                                  | mpv, Celluloid, Haruna                           |
 | PDF            | Evince                               | Okular, Zathura                                  |
-| Image viewer   | Loupe                                | Eye of GNOME, imv                                |
+| Image viewer   | Loupe                                | Eye of GNOME (eog), imv                        |
 | System monitor | btop                                 | Mission Center                                   |
 | Archive        | File Roller                          | —                                                |
 | Gaming         | —                                    | Steam, Heroic, Lutris, ProtonUp-Qt, MangoHud, GameMode |
-| Dev tools      | — (none preinstalled)                | C/C++ toolchain, Python, Node.js, Rust, Go, Docker, lazygit, GitHub CLI |
+| Dev tools      | C/C++ toolchain (gcc, make), Python + Node.js (preinstalled; the rest one click away in the menu) | C/C++ toolchain (adds gdb), Python pip, npm, Rust (rustup), Go, Docker (+ Compose), lazygit, GitHub CLI |
 
 ## Maia
 
@@ -55,5 +55,7 @@ Chromium web app on demand instead of preinstalling it.
 The glassy look is not limited to Hyprland: GTK apps use the
 Colloid-Dark theme with Papirus-Dark icons and the Bibata cursor, set
 both in `config/gtk-3.0/settings.ini` / `config/gtk-4.0/settings.ini`
-and via `gsettings` at install time.
+and via `gsettings` at install time. The `gsettings` step is skipped
+for ISO installs — inside the Calamares chroot there is no D-Bus
+session bus, so the settings.ini files apply the theme there instead.
 

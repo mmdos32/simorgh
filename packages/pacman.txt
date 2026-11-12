@@ -27,10 +27,15 @@ slurp
 brightnessctl
 playerctl
 pavucontrol
+# networkmanager: the daemon itself — the applet only pulls in libnm,
+# so without this `systemctl enable NetworkManager` would fail.
+networkmanager
+nm-connection-editor
 network-manager-applet
 noto-fonts
 noto-fonts-emoji
 ttf-jetbrains-mono-nerd
+inter-font
 hyprpolkitagent
 xdg-desktop-portal-hyprland
 qt6-wayland
@@ -98,12 +103,19 @@ man-db
 pacman-contrib
 xdg-utils
 blueman
+less
 
 # NOTE: some packages are installed by scripts, not from this list:
 #   flatpak            (menu: "Install Flatpak")
 #   power-profiles-daemon (install.sh, laptops only)
 #   nvidia-dkms, nvidia-utils, lib32-nvidia-utils + kernel headers
 #                      (install.sh, NVIDIA GPUs only)
+
+# Dual-boot: GRUB's os-prober detects other OSes (e.g. Windows);
+# ntfs-3g lets it read Windows NTFS partitions. Without these the
+# installed GRUB menu shows Simorgh only.
+os-prober
+ntfs-3g
 
 # Audio: PipeWire needs the PulseAudio/ALSA compat layers or
 # PulseAudio apps stay silent

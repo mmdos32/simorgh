@@ -1,0 +1,134 @@
+/* Simorgh Calamares stylesheet — one coherent light theme for the
+ * main pane, plus a sidebar override (see below). Calamares loads
+ * stylesheet.qss automatically from the branding directory. */
+
+QWidget {
+    background-color: #f4f7f8;
+    color: #1a2b33;
+    font-family: "Inter", "Noto Sans", sans-serif;
+}
+
+QLabel {
+    color: #1a2b33;
+}
+
+/* Sidebar: Calamares paints it dark from branding.desc via the
+ * palette, but the QWidget rule above overrides palette colors, so
+ * without this the sidebar would render light like the main pane.
+ * #sidebarApp is the sidebar container (a QWidget, not a QLabel);
+ * the step list is the QTreeView inside it, and #logoApp is its
+ * 80x80 logo label. Keep these colors in sync with branding.desc
+ * style:. */
+QWidget#sidebarApp {
+    background-color: #0d1418;
+    color: #e6edf3;
+}
+
+QWidget#sidebarApp QTreeView {
+    background-color: #0d1418;
+    color: #e6edf3;
+    border: none;
+}
+
+QWidget#sidebarApp QTreeView::item:selected {
+    background-color: #2dd4bf;
+    color: #0d1418;
+}
+
+QLabel#logoApp {
+    background-color: transparent;
+}
+
+QPushButton {
+    background-color: #2dd4bf;
+    color: #0d1418;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 18px;
+}
+
+QPushButton:hover {
+    background-color: #5eead4;
+}
+
+QPushButton:pressed {
+    background-color: #14b8a6;
+}
+
+QPushButton:disabled {
+    background-color: #c3ced4;
+    color: #475569;
+}
+
+QPushButton:flat {
+    background-color: transparent;
+    color: #0e7490;
+}
+
+QLineEdit, QComboBox, QSpinBox, QTextEdit {
+    background-color: #ffffff;
+    color: #1a2b33;
+    border: 1px solid #c3ced4;
+    border-radius: 4px;
+    padding: 4px 6px;
+    selection-background-color: #2dd4bf;
+    selection-color: #0d1418;
+}
+
+QComboBox::drop-down {
+    border: none;
+}
+
+/* Item views on the main pane (locale / keyboard / users / summary
+ * lists, and combo-box dropdowns): without these, Qt falls back to
+ * the system palette highlight (dark blue), which clashes with the
+ * teal theme. The sidebar tree above is more specific, so it keeps
+ * its dark background and teal selection. */
+QAbstractItemView {
+    background-color: #ffffff;
+    color: #1a2b33;
+    selection-background-color: #2dd4bf;
+    selection-color: #0d1418;
+}
+
+QAbstractItemView::item:selected {
+    background-color: #2dd4bf;
+    color: #0d1418;
+}
+
+QAbstractItemView::item:hover {
+    background-color: #d9f0ee;
+    color: #1a2b33;
+}
+
+QMenu::item:selected {
+    background-color: #2dd4bf;
+    color: #0d1418;
+}
+
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTextEdit:focus {
+    border: 1px solid #2dd4bf;
+}
+
+QProgressBar {
+    background-color: #e2e8f0;
+    border: none;
+    border-radius: 4px;
+    text-align: center;
+    color: #1a2b33;
+}
+
+QProgressBar::chunk {
+    background-color: #2dd4bf;
+    border-radius: 4px;
+}
+
+QCheckBox, QRadioButton {
+    color: #1a2b33;
+}
+
+QToolTip {
+    background-color: #0d1418;
+    color: #e6edf3;
+    border: none;
+}

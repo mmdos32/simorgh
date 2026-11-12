@@ -1,10 +1,24 @@
 # Publish an already-built ISO as a versioned release (no build).
 #
 # Manual trigger only. It downloads the ISO from an existing release,
-# renames it to simorgh-<version>-x86_64.iso, deletes the old release
-# (with its tag), and creates the new release. Use it to fix a release
-# name without rebuilding the ISO.
-# Example: source simorgh-iso-3 -> v1.0.
+# verifies it against the source release's checksum when one is
+# published, renames it to simorgh-<version>-x86_64.iso, creates the
+# new release, and only then deletes the old release (with its tag).
+# The source is never deleted before the new release exists, so a
+# failed create cannot lose the ISO. Use it to fix a release name
+# without rebuilding the ISO.
+#
+# Explicit inputs only: this workflow renames one release to another,
+# and a run-with-defaults must never be destructive. The defaults
+# (source_tag v1.0, version 1.0, delete_source false) point at the
+# release that already exists, so a default run fails the
+# "target release does not already exist" check instead of deleting
+# anything. To actually rename, pass source_tag + version explicitly
+# (and delete_source only when you mean to remove the source release).
+# This workflow is NOT part of the v1.0 publish flow: new versions are
+# published by build-iso.yml (allow_overwrite), which replaces the
+# v1.0 asset in place; the version in iso/profiledef.sh stays 1.0.
+# Example: source v1.0 -> v1.0.1.
 name: Publish ISO release
 
 on:
@@ -13,7 +27,7 @@ on:
       source_tag:
         description: 'Tag of the release the ISO is downloaded from'
         required: true
-        default: 'simorgh-iso-3'
+        default: 'v1.0'
       version:
         description: 'Version for the new release (tag will be v<version>)'
         required: true
@@ -21,8 +35,12 @@ on:
       delete_source:
         description: 'Delete the source release and its tag'
         required: false
-        default: true
+        default: false
         type: boolean
+
+concurrency:
+  group: publish-iso
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -31,24 +49,116 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Validate inputs
+        run: |
+          if [[ -z "${{ inputs.version }}" || ! "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Invalid version input: '${{ inputs.version }}' (expected e.g. 1.0 or 1.0.1)." >&2
+            exit 1
+          fi
+          if [[ -z "${{ inputs.source_tag }}" ]]; then
+            echo "source_tag must not be empty." >&2
+            exit 1
+          fi
+
+      - name: Check target release does not already exist
+        # Fail fast, before downloading anything, if this version is
+        # already released: action-gh-release would update it in
+        # place (replacing same-name assets) and delete_source would
+        # then delete the source release.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Fail closed on any error other than "not found": an auth,
+          # network, or API failure must not be mistaken for "the
+          # release does not exist", or the create step below would
+          # overwrite an existing release in place.
+          if output="$(gh release view "v${{ inputs.version }}" --repo "${{ github.repository }}" 2>&1)"; then
+            echo "Release v${{ inputs.version }} already exists. Refusing to overwrite it." >&2
+            exit 1
+          elif echo "$output" | grep -qi "404"; then
+            echo "Release v${{ inputs.version }} does not exist; proceeding."
+          else
+            echo "Could not check whether release v${{ inputs.version }} exists: $output" >&2
+            exit 1
+          fi
+
       - name: Download ISO from source release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download "${{ inputs.source_tag }}" --repo mmdos32/simorgh --pattern '*.iso'
-          mv simorgh-*.iso "simorgh-${{ inputs.version }}-x86_64.iso"
+          gh release download "${{ inputs.source_tag }}" --repo ${{ github.repository }} --pattern '*.iso'
+          # Refuse an ambiguous download: with more than one ISO the
+          # mv below would fail (or rename the wrong file).
+          iso_count="$(ls simorgh-*.iso 2>/dev/null | wc -l)"
+          if [[ "$iso_count" -ne 1 ]]; then
+            echo "Expected exactly one .iso in the source release, found $iso_count." >&2
+            exit 1
+          fi
+          # Also fetch the source release's checksum, if it published
+          # one. List the source release's assets first: a failed
+          # download of an existing checksum must fail the job, not
+          # silently skip verification (the old
+          # `gh release download ... || true` swallowed that, so a
+          # transient network failure shipped the ISO unverified).
+          # Fail closed if the asset list itself cannot be read.
+          if ! assets="$(gh release view "${{ inputs.source_tag }}" --repo ${{ github.repository }} --json assets --jq '.assets[].name' 2>&1)"; then
+            echo "Could not list the source release's assets: $assets" >&2
+            exit 1
+          fi
+          if echo "$assets" | grep -q '\.sha256$'; then
+            gh release download "${{ inputs.source_tag }}" --repo ${{ github.repository }} --pattern '*.sha256'
+          else
+            echo "Source release published no .sha256 asset; skipping checksum verification."
+          fi
+          # Skip the rename when the source ISO already has the target
+          # name: mv errors on a same-file rename under set -e.
+          src_iso="$(ls simorgh-*.iso)"
+          if [[ "$src_iso" != "simorgh-${{ inputs.version }}-x86_64.iso" ]]; then
+            mv "$src_iso" "simorgh-${{ inputs.version }}-x86_64.iso"
+          fi
           ls -lh simorgh-*.iso
-          sha256sum simorgh-*.iso
+          # Verify the download against the source checksum BEFORE the
+          # new checksum file is written below (otherwise ls would find
+          # our own file and the check would compare it with itself).
+          if ls *.sha256 >/dev/null 2>&1; then
+            sha_count="$(ls *.sha256 | wc -l)"
+            if [[ "$sha_count" -ne 1 ]]; then
+              echo "Expected exactly one .sha256 file in the source release, found $sha_count." >&2
+              exit 1
+            fi
+            expected="$(awk '{print $1}' *.sha256)"
+            actual="$(sha256sum "simorgh-${{ inputs.version }}-x86_64.iso" | awk '{print $1}')"
+            if [[ "$expected" != "$actual" ]]; then
+              echo "Checksum mismatch: downloaded ISO does not match the source release checksum" >&2
+              exit 1
+            fi
+            echo "Checksum verified against the source release."
+          fi
+          # Drop the source release's checksum: the release step below
+          # uploads simorgh-*.sha256, which would otherwise match the
+          # stale file too and ship it (wrong embedded filename, so
+          # sha256sum -c on it fails) alongside the new one.
+          rm -f *.sha256
+          sha256sum "simorgh-${{ inputs.version }}-x86_64.iso" > "simorgh-${{ inputs.version }}-x86_64.iso.sha256"
+          cat "simorgh-${{ inputs.version }}-x86_64.iso.sha256"
+
+      - name: Create versioned release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
+        with:
+          tag_name: v${{ inputs.version }}
+          name: Simorgh ${{ inputs.version }}
+          files: |
+            simorgh-*.iso
+            simorgh-*.sha256
 
       - name: Delete source release
         if: ${{ inputs.delete_source }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete "${{ inputs.source_tag }}" --repo mmdos32/simorgh --yes --cleanup-tag
-
-      - name: Create versioned release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ inputs.version }}
-          name: Simorgh ${{ inputs.version }}
-          files: simorgh-*.iso
+        run: |
+          # Self-deletion guard: never delete the release just created.
+          if [[ "${{ inputs.source_tag }}" == "v${{ inputs.version }}" ]]; then
+            echo "Refusing to delete the source release: it is the release just created (v${{ inputs.version }})." >&2
+            exit 1
+          fi
+          gh release delete "${{ inputs.source_tag }}" --repo ${{ github.repository }} --yes --cleanup-tag

@@ -7,6 +7,10 @@ After=local-fs.target
 Type=oneshot
 ExecStart=/usr/local/lib/simorgh-live-setup.sh
 RemainAfterExit=yes
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

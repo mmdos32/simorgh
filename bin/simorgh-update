@@ -4,8 +4,8 @@
 # (non-interactively: the saved locale is reused).
 # The clone is found in this order:
 #   1. $SIMORGH_REPO
-#   2. ~/simorgh
-#   3. the path recorded at install time in ~/.local/share/simorgh/repo-path
+#   2. the path recorded at install time in ~/.local/share/simorgh/repo-path
+#   3. ~/simorgh
 set -euo pipefail
 
 SHARE_DIR="$HOME/.local/share/simorgh"
@@ -15,10 +15,6 @@ find_repo() {
     echo "$SIMORGH_REPO"
     return 0
   fi
-  if [[ -d "$HOME/simorgh/.git" ]]; then
-    echo "$HOME/simorgh"
-    return 0
-  fi
   if [[ -f "$SHARE_DIR/repo-path" ]]; then
     local p
     p="$(cat "$SHARE_DIR/repo-path")"
@@ -26,6 +22,10 @@ find_repo() {
       echo "$p"
       return 0
     fi
+  fi
+  if [[ -d "$HOME/simorgh/.git" ]]; then
+    echo "$HOME/simorgh"
+    return 0
   fi
   return 1
 }
@@ -37,9 +37,171 @@ REPO="$(find_repo)" || {
 }
 
 echo "Updating Simorgh from $REPO ..."
+# The recorded path and ~/simorgh are both user-controlled: make sure
+# the clone we are about to pull and execute is actually Simorgh, not
+# some other repo that happens to sit at that path.
+# The origin must be github.com/mmdos32/simorgh: a bare mmdos32/simorgh
+# substring would also match an attacker's host.
+remote="$(git -C "$REPO" remote get-url origin 2>/dev/null || true)"
+if [[ -n "$remote" && ! "$remote" =~ (^|[@/])github\.com[:/]mmdos32/simorgh(\.git)?$ ]]; then
+  echo "simorgh-update: $REPO is not the Simorgh repo (origin: $remote)." >&2
+  echo "Set SIMORGH_REPO to the right clone and try again." >&2
+  exit 1
+fi
+# An ISO-installed ~/simorgh is always on a detached HEAD (the installer
+# checks out a pinned commit), and `git pull` refuses on a detached HEAD.
+# Re-attach to the default branch first; normal clones skip this entirely.
+if ! git -C "$REPO" symbolic-ref -q HEAD >/dev/null; then
+  branch="$(git -C "$REPO" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  branch="${branch#origin/}"
+  [[ -n "$branch" ]] || branch="main"
+  echo "simorgh-update: detached HEAD detected; checking out $branch first ..." >&2
+  git -C "$REPO" checkout --quiet "$branch" || {
+    echo "simorgh-update: could not check out $branch in $REPO — leaving it untouched." >&2
+    echo "Check with: git -C $REPO status" >&2
+    exit 1
+  }
+fi
 git -C "$REPO" pull --ff-only || {
   echo "simorgh-update: pull failed (local changes in $REPO?)." >&2
   echo "Check with: git -C $REPO status" >&2
   exit 1
 }
+# hyprpaper 0.8 only reads the block form; a user-edited hyprpaper.conf
+# still in the old flat form (`preload = ...` / `wallpaper = ,path`) is
+# silently ignored, so the wallpaper never loads — and install.sh leaves
+# edited configs in place, so the repo's fixed file never heals it.
+# Convert it when that is unambiguous (exactly one wallpaper line with
+# no monitor), otherwise warn loudly with the exact fix instead of
+# guessing. Always returns 0: a stale wallpaper config must not fail
+# the update.
+heal_hyprpaper_conf() {
+  local conf="$HOME/.config/hypr/hyprpaper.conf"
+  [[ -f "$conf" ]] || return 0
+  # Already in block form: nothing to heal (flat lines beside a block
+  # are ignored by hyprpaper, same as before).
+  if grep -qE '^[[:space:]]*wallpaper[[:space:]]*\{' "$conf"; then
+    return 0
+  fi
+  # No flat-form lines at all: nothing to heal.
+  if ! grep -qE '^[[:space:]]*(preload|wallpaper)[[:space:]]*=' "$conf"; then
+    return 0
+  fi
+  local -a wall_lines
+  mapfile -t wall_lines < <(grep -E '^[[:space:]]*wallpaper[[:space:]]*=' "$conf" || true)
+  # The path capture stops at `#` only when it starts a trailing
+  # comment (whitespace before it): the old `(#.*)?` let a `#` inside
+  # a real filename match as a comment, so `wallpaper = ,/a/b#hash.png`
+  # converted to a nonexistent path `/a/b` while reporting "converted".
+  # A bare `#` in a filename now fails the match, and such a line
+  # falls through to the warning below instead of converting.
+  # Likewise `;` terminates the value in hyprlang, so a `;` inside a
+  # filename (`/a/b;c.png`) would convert to a truncated path `/a/b`
+  # while reporting "converted" — `;` is excluded from the capture
+  # too, and such a line falls through to the warning below.
+  # Trailing whitespace after the path (or after the comment) is
+  # allowed. A space-`#` filename (`/a/b #hash.png`) still matches
+  # with path `/a/b`, so the captured path is verified to exist
+  # below before converting.
+  if [[ "${#wall_lines[@]}" -eq 1 ]] && [[ "${wall_lines[0]}" =~ ^[[:space:]]*wallpaper[[:space:]]*=[[:space:]]*,[[:space:]]*([^[:space:]#;][^#;]*[^[:space:]#;]|[^[:space:]#;])([[:space:]]+#.*)?[[:space:]]*$ ]]; then
+    local path="${BASH_REMATCH[1]}"
+    # hyprpaper does not expand `~` in `path` (tilde expansion is
+    # documented only for `source`): a flat-form `~/...` path copied
+    # verbatim into the block would never load. Expand a leading `~`
+    # to $HOME so the healed block carries an absolute path, the same
+    # form simorgh-theme writes.
+    if [[ "$path" == "~" ]]; then
+      path="$HOME"
+    elif [[ "$path" == "~/"* ]]; then
+      # NOTE: ${path#~/} does NOT work here — bash tilde-expands the
+      # `~` in the removal pattern, so it never matches. Strip the
+      # two leading chars by offset instead.
+      path="$HOME/${path:2}"
+    fi
+    # A space before `#` in a filename is indistinguishable from a
+    # trailing comment by regex alone (`/a/b #hash.png` captures
+    # `/a/b`): only convert when the captured path really exists,
+    # otherwise warn instead of writing a block that points at a
+    # nonexistent file.
+    if [[ ! -f "$path" ]]; then
+      echo "WARNING: ~/.config/hypr/hyprpaper.conf points at '$path', which does not exist — leaving it unchanged (check for a '#' in the filename, or a typo)." >&2
+      return 0
+    fi
+    # Preserve user-set top-level hyprpaper options (splash / ipc):
+    # the rewrite below replaces the whole file with a wallpaper-only
+    # block, and a user-set `splash = false` / `ipc = off` used to be
+    # lost (only the .bak kept it).
+    local -a extra_lines
+    mapfile -t extra_lines < <(grep -E '^[[:space:]]*(splash|splash_offset|ipc)[[:space:]]*=' "$conf" || true)
+    cp "$conf" "$conf.bak" || {
+      echo "WARNING: simorgh-update: could not back up ~/.config/hypr/hyprpaper.conf — leaving it unchanged." >&2
+      return 0
+    }
+    # Stage the new conf in a temp file and rename it into place:
+    # writing straight to the live conf in three steps (truncate,
+    # then two appends) used to leave a header-only conf behind when
+    # a later step failed, while the warning claimed "leaving it
+    # unchanged". A failed stage leaves the old conf untouched.
+    local tmp_conf="$conf.tmp.$$"
+    # The preserved splash/ipc lines go BEFORE the wallpaper block:
+    # like the template and simorgh-theme, top-level keys first —
+    # unproven whether hyprpaper 0.8 reads top-level keys that come
+    # after a block, so don't risk appending them at the end.
+    if ! cat > "$tmp_conf" <<EOF; then
+# Simorgh — hyprpaper (wallpaper)
+# Converted from the old flat form by simorgh-update: hyprpaper 0.8
+# only reads the block form, the flat preload/wallpaper lines were ignored.
+EOF
+      rm -f "$tmp_conf"
+      echo "WARNING: simorgh-update: could not rewrite ~/.config/hypr/hyprpaper.conf — leaving it unchanged (backup: ~/.config/hypr/hyprpaper.conf.bak)." >&2
+      return 0
+    fi
+    if [[ "${#extra_lines[@]}" -gt 0 ]]; then
+      printf '# Preserved from the old flat form by simorgh-update (splash/ipc live outside the wallpaper block).\n' >> "$tmp_conf" || {
+        rm -f "$tmp_conf"
+        echo "WARNING: simorgh-update: could not write to ~/.config/hypr/hyprpaper.conf — leaving it unchanged." >&2
+        return 0
+      }
+      printf '%s\n' "${extra_lines[@]}" >> "$tmp_conf" || {
+        rm -f "$tmp_conf"
+        echo "WARNING: simorgh-update: could not write to ~/.config/hypr/hyprpaper.conf — leaving it unchanged." >&2
+        return 0
+      }
+    fi
+    if ! cat >> "$tmp_conf" <<EOF; then
+wallpaper {
+    monitor = ;
+    path = $path;
+    fit_mode = cover;
+}
+EOF
+      rm -f "$tmp_conf"
+      echo "WARNING: simorgh-update: could not write to ~/.config/hypr/hyprpaper.conf — leaving it unchanged." >&2
+      return 0
+    fi
+    mv "$tmp_conf" "$conf" || {
+      rm -f "$tmp_conf"
+      echo "WARNING: simorgh-update: could not replace ~/.config/hypr/hyprpaper.conf — leaving it unchanged (backup: ~/.config/hypr/hyprpaper.conf.bak)." >&2
+      return 0
+    }
+    echo "simorgh-update: converted the old flat-form ~/.config/hypr/hyprpaper.conf to the block form (backup: ~/.config/hypr/hyprpaper.conf.bak)."
+    return 0
+  fi
+  # Cannot convert safely (several wallpaper lines, a named monitor, or
+  # no wallpaper line at all): say so loudly instead of guessing.
+  echo "WARNING: ~/.config/hypr/hyprpaper.conf still uses the old flat form (preload = / wallpaper = ,path), which hyprpaper 0.8 ignores — your wallpaper will not load." >&2
+  echo "Convert it to the block form, or run 'simorgh-theme <theme>' to regenerate it:" >&2
+  echo "  wallpaper {" >&2
+  echo "      monitor = ;" >&2
+  echo "      path = <your wallpaper path>;" >&2
+  echo "      fit_mode = cover;" >&2
+  echo "  }" >&2
+  return 0
+}
+
+# Heal a user-edited hyprpaper.conf still in the old flat form (see above):
+# install.sh never overwrites edited configs, so without this the dead
+# flat form would survive every update.
+heal_hyprpaper_conf
+
 exec "$REPO/install.sh"

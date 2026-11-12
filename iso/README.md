@@ -14,25 +14,33 @@ Simorgh ISO (USB)  →  live Hyprland desktop, Calamares opens
        →  reboot  →  SDDM login  →  Simorgh desktop, ready
 ```
 
-1. **Boot the ISO.** It logs in automatically and the installer
-   window opens on the desktop. Connect to WiFi first if you need it
-   (the network icon in the bar, or `nmtui` in a terminal).
+1. **Boot the ISO.** It logs in automatically as `liveuser`
+   (password `live`) and the installer window opens on the desktop.
+   Connect to Wi-Fi first if you need it — press `SUPER + W`
+   (opens `nmtui`). If you close the installer, press `SUPER + I`
+   to reopen it.
 2. **Click through Calamares:** language and timezone, keyboard,
    disk (with optional LUKS encryption — the installer asks),
-   your user account and password, then Install. It copies the
+   your user account and password, then a summary screen, then Install. It copies the
    system, installs the bootloader and the Simorgh packages, then
    runs the Simorgh install inside the new system (same installer
    the script method uses, in its non-interactive `--chroot` mode:
-   yay + AUR packages, Maia, Sung, themes, services).
+   yay + AUR packages, Maia, Sung, themes, services). The install can
+   take a long time on a slow machine — Sung alone can take well over
+   an hour to build (the installer allows up to 4 hours for this step),
+   so leave it running.
 3. **Reboot when it says so.** Log in with SDDM. The desktop is
    ready — no commands to run afterwards.
 
 ## Building the ISO
 
-On Arch Linux, as root:
+On Arch Linux, via sudo (not from a root shell — `build.sh` needs to
+know your user so the AUR build can run as you, since `makepkg`
+refuses to run as root). Prerequisites: `git`, `python3`,
+`base-devel` (for `makepkg`), and `archiso`:
 
 ```bash
-sudo pacman -S archiso
+sudo pacman -S git python base-devel archiso
 sudo ./iso/build.sh
 ```
 
@@ -73,10 +81,10 @@ cached package. The repo directory is gitignored.
   user account go through archinstall's own menus in the console
   fallback (`simorgh-install`). It cannot drive an unattended install.
 - **Console fallback:** if the graphical session fails to start on
-  some hardware, the ISO also boots to a console where
-  `simorgh-install` (the v1 text installer) still works — it
-  installs base Arch via archinstall, then prints the one command
-  to run after reboot.
+  some hardware, the ISO falls back to a root console (tty1,
+  auto-login) where `simorgh-install` (the v1 text installer) still
+  works — it installs base Arch via archinstall, then prints the one
+  command to run after reboot.
 
 ## Files
 
@@ -86,13 +94,15 @@ iso/
   pacman.conf.template     pacman config template (build.sh generates
                            pacman.conf from it, with the local repo path)
   packages.x86_64          packages in the live environment
-  build.sh                 mkarchiso wrapper (run as root on Arch)
+  build.sh                 mkarchiso wrapper (run via sudo on Arch)
   gen-packages-conf.py     generates the Calamares package list
   syslinux/                BIOS boot menu (from archiso releng,
                            rebranded to Simorgh; splash.png is the
                            phoenix signature, 640x480)
-  efiboot/loader/          UEFI boot entries (loader.conf +
-                           01/02/03-simorgh-*.conf)
+  efiboot/loader/          UEFI boot entries (loader.conf)
+    entries/               01-simorgh-linux.conf,
+                           02-simorgh-speech-linux.conf,
+                           03-simorgh-memtest86+x64.conf
   repo/                    local pacman repo (Calamares build, cached,
                            created at build time, gitignored)
   airootfs/
@@ -107,12 +117,15 @@ iso/
     etc/profile.d/simorgh.sh   session PATH for the live user
     etc/calamares/
       settings.conf        module sequence + the simorgh shellprocess job
-      branding/simorgh/    logo, welcome image (colors in branding.desc);
-                           show.qml + squid.png are the Calamares
-                           default slideshow (stand-in — rebrand later)
+      branding/simorgh/    logo (phoenix), welcome image,
+                           stylesheet.qss (light installer styling;
+                           colors in branding.desc); show.qml is the
+                           branded 4-slide slideshow (9 s per slide)
       modules/             welcome, locale, partition, users,
                            unpackfs, packages, bootloader,
-                           displaymanager, finished, shellprocess@simorgh
+                           displaymanager, finished, shellprocess@simorgh,
+                           shellprocess@keyring (populates the target
+                           keyring before the packages step)
                            (keyboard/mount/fstab use Calamares defaults)
     etc/mkinitcpio.conf.d/archiso.conf   archiso initramfs hooks
                            (from releng — without these the live ISO
@@ -134,6 +147,7 @@ iso/
                            (symlink — the live session needs a working
                            network before Calamares runs)
     etc/motd               welcome banner on the console
+    etc/issue              live-installer console banner
     etc/hostname           simorgh-live
     etc/systemd/system/getty@tty1.service.d/autologin.conf
 ```

@@ -3,6 +3,8 @@
 *.iso
 iso/work/
 iso/out/
+iso/out.bak/
+iso/__pycache__/
 iso/repo/
 iso/pacman.conf
 iso/airootfs/opt/simorgh/

@@ -15,6 +15,36 @@ warn()  { printf '\033[1;33m[!]\033[0m %s\n' "$*"; }
 
 REPO_DIR="/opt/simorgh"
 
+# --- Live-only cleanup (runs even on failure) -------------------------------
+# unpackfs copied the whole live image into the target. If install.sh
+# fails, or this script dies part-way, the removals below must still run:
+# otherwise the target would keep passwordless sudo for a nonexistent
+# liveuser and autologin it on first boot. The EXIT trap covers a
+# non-zero exit and INT/TERM; nothing can cover SIGKILL. Every removal
+# is idempotent, so the explicit cleanup step at the end of a successful
+# run simply repeats them.
+cleanup_live_files() {
+  rm -f /etc/sudoers.d/simorgh-chroot /etc/sudoers.d/liveuser
+  # Only remove the LIVE autologin: this path is also the conventional
+  # place for a user's own autologin choice (users.conf offers
+  # autologin, and the displaymanager module runs before this cleanup),
+  # so delete it only while it still names liveuser.
+  grep -q '^User=liveuser' /etc/sddm.conf.d/autologin.conf 2>/dev/null && rm -f /etc/sddm.conf.d/autologin.conf || true
+  rm -f /etc/systemd/system/simorgh-live-user.service
+  rm -f /etc/systemd/system/multi-user.target.wants/simorgh-live-user.service
+  rm -f /usr/local/lib/simorgh-live-setup.sh
+  rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
+  rm -rf /etc/calamares
+  rm -f /etc/motd
+  # The live image's /etc/issue names the live installer and the liveuser
+  # console login; unpackfs copied it into the target, so drop it the
+  # same way as /etc/motd above.
+  rm -f /etc/issue
+  rm -f /usr/local/bin/simorgh-install /usr/local/bin/simorgh-target-install
+  rm -rf /usr/share/simorgh
+}
+trap cleanup_live_files EXIT
+
 # --- Find the user -----------------------------------------------------------
 TARGET_USER="$(awk -F: '$3 >= 1000 && $3 < 60000 { print $1; exit }' /etc/passwd)"
 [[ -n "$TARGET_USER" ]] || { echo "No regular user found in the target." >&2; exit 1; }
@@ -26,44 +56,106 @@ LOCALE="$(grep -E '^LANG=' /etc/locale.conf 2>/dev/null | cut -d= -f2- | tr -d '
 info "Locale: $LOCALE"
 
 # --- Keyring (safety net) ----------------------------------------------------
-if ! pacman-key --list-keys >/dev/null 2>&1; then
-  pacman-key --init --populate archlinux || warn "pacman-key populate failed; package installs may fail."
-fi
+# Unconditional: `pacman-key --list-keys` exits 0 on an initialized-but-
+# empty keyring, so testing it never detects a keyring with no Arch
+# master keys — and the later `pacman -S linux` then fails on signature
+# verification instead. --populate is idempotent, so just run it.
+pacman-key --init --populate archlinux || warn "pacman-key populate failed; package installs may fail."
 
 # --- The Simorgh install -----------------------------------------------------
 [[ -x "$REPO_DIR/install.sh" ]] || { echo "Simorgh repo not found at $REPO_DIR." >&2; exit 1; }
 "$REPO_DIR/install.sh" --chroot --user "$TARGET_USER" --locale "$LOCALE"
+
+# install.sh's own trap only covers EXIT/INT/TERM; remove the temporary
+# passwordless-sudo grant here too, so a later failure can't leave it behind.
+rm -f /etc/sudoers.d/simorgh-chroot
 
 # --- Give the user a real git clone ------------------------------------------
 # The staged /opt/simorgh has no .git (build.sh excludes it), and
 # simorgh-update needs a git repo. Clone it fresh (network is available).
 USER_HOME="/home/$TARGET_USER"
 if [[ -d "$USER_HOME/simorgh" ]]; then
-  rm -rf "$USER_HOME/simorgh"
+  rm -rf "$USER_HOME/simorgh" || warn "Could not remove the old $USER_HOME/simorgh before cloning; the clone below may fail."
 fi
-if git clone https://github.com/mmdos32/simorgh.git "$USER_HOME/simorgh"; then
-  info "Cloned the Simorgh repo into $USER_HOME/simorgh."
-else
-  warn "Could not clone the Simorgh repo; keeping the staged copy instead."
-  mv "$REPO_DIR" "$USER_HOME/simorgh"
+REPO_PATH="$USER_HOME/simorgh"
+# The ISO was built from one exact commit; build.sh stamps it into
+# /opt/simorgh/.build-commit so the installed clone matches the staged
+# tree instead of floating to whatever main is today. A missing or
+# unusable stamp falls back to the v1.0 release, as before.
+BUILD_COMMIT=""
+if [[ -f "$REPO_DIR/.build-commit" ]]; then
+  BUILD_COMMIT="$(tr -d '[:space:]' < "$REPO_DIR/.build-commit" || true)"
 fi
-echo "$USER_HOME/simorgh" > "$USER_HOME/.local/share/simorgh/repo-path"
-chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/simorgh" "$USER_HOME/.local/share/simorgh/repo-path"
-rm -rf "$REPO_DIR"
+CLONE_OK=0
+if [[ "$BUILD_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+  if git clone https://github.com/mmdos32/simorgh.git "$USER_HOME/simorgh" \
+      && git -C "$USER_HOME/simorgh" checkout --quiet "$BUILD_COMMIT"; then
+    info "Cloned the Simorgh repo into $USER_HOME/simorgh (pinned to build commit ${BUILD_COMMIT:0:12})."
+    CLONE_OK=1
+  else
+    warn "Could not check out build commit $BUILD_COMMIT; falling back to v1.0."
+    rm -rf "$USER_HOME/simorgh" || warn "Could not remove the failed $USER_HOME/simorgh clone; the v1.0 fallback clone below may fail."
+  fi
+elif [[ -n "$BUILD_COMMIT" ]]; then
+  warn "Ignoring malformed build stamp in $REPO_DIR/.build-commit; falling back to v1.0."
+fi
+if [[ "$CLONE_OK" -eq 0 ]]; then
+  if git clone --branch v1.0 https://github.com/mmdos32/simorgh.git "$USER_HOME/simorgh"; then
+    info "Cloned the Simorgh repo into $USER_HOME/simorgh."
+    CLONE_OK=1
+  else
+    warn "Could not clone the Simorgh repo; keeping the staged copy at $REPO_DIR."
+    warn "It has no .git, so simorgh-update will NOT work until you clone the repo yourself."
+    REPO_PATH="$REPO_DIR"
+  fi
+fi
+echo "$REPO_PATH" > "$USER_HOME/.local/share/simorgh/repo-path" || warn "Could not write the repo path to $USER_HOME/.local/share/simorgh/repo-path; simorgh-update may not find the repo."
+chown -R "$TARGET_USER:$TARGET_USER" "$REPO_PATH" "$USER_HOME/.local/share/simorgh/repo-path" || warn "Could not hand ownership of the Simorgh repo to $TARGET_USER; simorgh-update may fail — fix it with 'sudo chown -R $TARGET_USER:$TARGET_USER $REPO_PATH'."
+if [[ "$REPO_PATH" != "$REPO_DIR" ]]; then
+  rm -rf "$REPO_DIR" || warn "Could not remove the staged copy at $REPO_DIR; it has no .git, so simorgh-update will use $REPO_PATH instead."
+fi
 
 # --- Clean up live-only files ------------------------------------------------
 # unpackfs copied the whole live image into the target; remove everything
 # that belongs to the live session only. Without this, the installed
 # system would autologin a nonexistent liveuser and recreate it on
 # first boot (with passwordless sudo).
-rm -f /etc/sddm.conf.d/autologin.conf
-rm -f /etc/systemd/system/simorgh-live-user.service
-rm -f /etc/systemd/system/multi-user.target.wants/simorgh-live-user.service
-rm -f /usr/local/lib/simorgh-live-setup.sh
-rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
-rm -f /etc/sudoers.d/liveuser /etc/sudoers.d/simorgh-chroot
-rm -rf /etc/calamares
-rm -f /etc/motd
-rm -f /usr/local/bin/simorgh-install /usr/local/bin/simorgh-target-install
-rm -rf /usr/share/simorgh
+
+# The live image's mkinitcpio drop-in (archiso-only HOOKS, no autodetect)
+# leaked into the target via unpackfs; drop it (the keyring step already
+# removed it before the packages step — this is the belt-and-braces copy)
+# and regenerate the initramfs natively by reinstalling the kernel: the
+# linux package's install hook runs mkinitcpio with the stock config.
+# Do NOT replace this with a manual mkinitcpio rebuild here instead —
+# that was tried before and does not regenerate reliably (round-4 audit). Do NOT add --needed below:
+# without it pacman reinstalls the same-version kernel and fires the
+# hook; with it the reinstall (and the regeneration) would be skipped.
+# NOTE: the packages step does NOT do this reinstall for us — linux is
+# not in the packages install list — so it is forced here, explicitly.
+rm -f /etc/mkinitcpio.conf.d/archiso.conf
+if ! pacman -S --noconfirm linux; then
+  echo "linux reinstall failed; the initramfs is still the live one (archiso hooks) and cannot boot the installed disk. Aborting the install." >&2
+  exit 1
+fi
+
+# The live image is called simorgh-live; the installed system is simorgh.
+# Only rename when the hostname is still the live default — never clobber
+# a value set by the user or by another installer module. (No hostname
+# input exists in the installer UI, so in practice this is always
+# simorgh-live; the conditional keeps a future hostname step safe.)
+# An empty/missing hostname file is also defaulted to simorgh.
+CURRENT_HOSTNAME="$(tr -d '[:space:]' < /etc/hostname 2>/dev/null || true)"
+if [[ "$CURRENT_HOSTNAME" == "simorgh-live" || -z "$CURRENT_HOSTNAME" ]]; then
+  echo "simorgh" > /etc/hostname || warn "Could not write the hostname to /etc/hostname; the system keeps the live hostname."
+  if [[ -f /etc/hosts ]]; then
+    sed -i 's/simorgh-live/simorgh/g' /etc/hosts || warn "Could not update /etc/hosts with the new hostname; the old hostname may still appear there."
+  fi
+else
+  info "Keeping hostname '$CURRENT_HOSTNAME' (not the live default); leaving /etc/hosts untouched."
+fi
+
+# The removals live in cleanup_live_files() (trapped on EXIT above), so a
+# failed install is cleaned up too; this call is the explicit success-path
+# pass and is idempotent.
+cleanup_live_files
 info "Simorgh installed in the target system."

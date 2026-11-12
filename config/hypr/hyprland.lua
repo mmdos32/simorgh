@@ -21,6 +21,7 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("waybar")
     hl.exec_cmd("swaync")
     hl.exec_cmd("hyprpaper")
+    hl.exec_cmd("hypridle")
     hl.exec_cmd("/usr/lib/hyprpolkitagent/hyprpolkitagent")
     hl.exec_cmd("wl-paste --watch cliphist store 2>/dev/null || true")
     hl.exec_cmd("simorgh-welcome")
@@ -31,10 +32,13 @@ end)
 hl.env("XDG_SESSION_TYPE", "wayland")
 hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
 hl.env("XDG_SESSION_DESKTOP", "Hyprland")
-hl.env("QT_QPA_PLATFORM", "wayland")
+hl.env("QT_QPA_PLATFORM", "wayland;xcb")
 hl.env("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1")
 hl.env("MOZ_ENABLE_WAYLAND", "1")
-hl.env("GDK_BACKEND", "wayland")
+-- GTK falls back to X11 (then any backend) for XWayland-only apps.
+hl.env("GDK_BACKEND", "wayland,x11,*")
+-- SDL takes a single driver name, so there is no fallback list for it;
+-- the wiki lists plain "wayland" (use "x11" instead if an old SDL game breaks).
 hl.env("SDL_VIDEODRIVER", "wayland")
 hl.env("_JAVA_AWT_WM_NONREPARENTING", "1")
 hl.env("XDG_SCREENSHOTS_DIR", os.getenv("HOME") .. "/Pictures/Screenshots")
@@ -120,12 +124,6 @@ hl.config({
     },
 })
 
-hl.config({
-    master = {
-        new_status = "master",
-    },
-})
-
 -- -------------------------------------------------------------- Gestures
 -- 3-finger horizontal swipe switches workspaces.
 -- (The legacy `gestures { workspace_swipe = true }` option no longer
@@ -175,7 +173,7 @@ hl.window_rule({
 -- Small dialogs float; Sung opens as a small floating mini player.
 hl.window_rule({
     name = "float-pavucontrol",
-    match = { class = "^(pavucontrol)$" },
+    match = { class = "^(pavucontrol|org\\.pulseaudio\\.pavucontrol)$" },
     float = true,
 })
 hl.window_rule({
@@ -260,11 +258,13 @@ hl.bind(mainMod .. " + up", hl.dsp.focus({ direction = "up" }))
 hl.bind(mainMod .. " + down", hl.dsp.focus({ direction = "down" }))
 
 -- Focus monitor (multi-monitor)
--- NOTE: the documented Lua form is focus({ monitor = ... }); this is the
--- one mapping that could not be confirmed against a live Hyprland here —
--- VM test 4 must check SUPER+CTRL+arrows actually switch monitors.
+-- NOTE: the Lua form focus({ monitor = ... }) is wiki-confirmed; only
+-- live-hardware proof remains — VM test 4 must check SUPER+CTRL+arrows
+-- actually switch monitors.
 hl.bind(mainMod .. " + CTRL + left", hl.dsp.focus({ monitor = "l" }))
 hl.bind(mainMod .. " + CTRL + right", hl.dsp.focus({ monitor = "r" }))
+hl.bind(mainMod .. " + CTRL + up", hl.dsp.focus({ monitor = "u" }))
+hl.bind(mainMod .. " + CTRL + down", hl.dsp.focus({ monitor = "d" }))
 
 -- Move windows
 hl.bind(mainMod .. " + SHIFT + left", hl.dsp.window.move({ direction = "left" }))
@@ -322,7 +322,10 @@ hl.bind(mainMod .. " + ALT + P", hl.dsp.exec_cmd("hyprpicker -a"))
 hl.bind(mainMod .. " + ALT + R", hl.dsp.exec_cmd("simorgh-record"))
 hl.bind(mainMod .. " + period", hl.dsp.exec_cmd("rofi -show emoji"))
 hl.bind(mainMod .. " + ALT + B", hl.dsp.exec_cmd("pkill -SIGUSR1 waybar"))
-hl.bind(mainMod .. " + SHIFT + L", hl.dsp.exec_cmd("bash -c 'hyprlock & sleep 1; systemctl suspend'"))
+-- Lock + suspend: wait until hyprlock is actually up before suspending —
+-- a fixed `sleep 1` was too short on slow machines (same pattern as
+-- simorgh-power's lock_screen); if the lock never starts, don't suspend.
+hl.bind(mainMod .. " + SHIFT + L", hl.dsp.exec_cmd("bash -c 'hyprlock & for i in $(seq 1 50); do pgrep -x hyprlock >/dev/null && break; sleep 0.1; done; pgrep -x hyprlock >/dev/null && sleep 0.5 && systemctl suspend'"))
 hl.bind(mainMod .. " + Z", hl.dsp.focus({ workspace = "previous" }))
 
 -- Move window to workspace silently (stay on current workspace)

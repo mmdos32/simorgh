@@ -14,7 +14,7 @@ OUT = ROOT / "iso/airootfs/etc/calamares/modules/packages.conf"
 EXTRA = ["sudo", "grub", "efibootmgr"]
 # Live-only packages unpackfs copies into the target but the installed
 # system doesn't need.
-REMOVE = ["calamares", "archinstall"]
+REMOVE = ["calamares", "archinstall", "mkinitcpio-archiso", "mkinitcpio-nfs-utils"]
 
 
 def read_list(path):

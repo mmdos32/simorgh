@@ -9,15 +9,23 @@ strings:
     versionedName:       Simorgh 1.0
     bootloaderEntryName: Simorgh
     productUrl:          https://github.com/mmdos32/simorgh
-    supportUrl:          https://github.com/mmdos32/simorgh/issues
+    supportUrl:          https://github.com/mmdos32/simorgh/blob/main/manual/01-install.md
     knownIssuesUrl:      https://github.com/mmdos32/simorgh/issues
     releaseNotesUrl:     https://github.com/mmdos32/simorgh/releases
 images:
     productLogo:         "logo.png"
     productIcon:         "logo.png"
     productWelcome:      "welcome.png"
+# Window behavior: Calamares 3.4 keys. windowSize is the initial size,
+# windowExpanding "normal" lets it grow as needed, windowPlacement
+# "center" puts it in the middle of the screen.
+windowExpanding:         normal
+windowSize:              1024px,620px
+windowPlacement:         center
 style:
     sidebarBackground:   "#0d1418"
     sidebarText:         "#e6edf3"
-    sidebarTextSelect:   "#2dd4bf"
+    sidebarTextSelect:   "#0d1418"
     sidebarTextHighlight: "#2dd4bf"
+# The light main-pane theme lives in stylesheet.qss in this same
+# directory; Calamares loads it automatically, no key needed here.

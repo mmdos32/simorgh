@@ -2,12 +2,55 @@
 # simorgh-power — Rofi power menu: lock, logout, suspend, reboot, power off.
 set -euo pipefail
 
+notify() {
+  command -v notify-send >/dev/null && notify-send "Simorgh" "$*" 2>/dev/null || true
+}
+
+command -v rofi >/dev/null || { notify "rofi is not installed — cannot show the power menu."; echo "simorgh-power: rofi is not installed." >&2; exit 1; }
+if ! command -v hyprlock >/dev/null; then
+  notify "hyprlock is not installed — Lock and Suspend will not lock the screen."
+fi
+
+confirm() { # confirm <prompt> — succeeds only if the user picks Yes
+  local ans
+  ans="$(printf 'No\nYes' | rofi -dmenu -p "$1" -i)" || return 1
+  [[ "$ans" == "Yes" ]]
+}
+
+lock_screen() {
+  # Lock, then wait until the lock screen is actually up before doing
+  # anything that assumes the session is locked (e.g. suspending) —
+  # a fixed `sleep 1` was too short on slow machines.
+  if ! command -v hyprlock >/dev/null; then
+    notify "hyprlock is not installed — cannot lock."
+    return 1
+  fi
+  hyprlock &
+  local i
+  for i in $(seq 1 50); do
+    pgrep -u "$(id -un)" -x hyprlock >/dev/null && break
+    sleep 0.1
+  done
+  if ! pgrep -u "$(id -un)" -x hyprlock >/dev/null; then
+    notify "hyprlock did not start in time — not suspending."
+    return 1
+  fi
+  # A running hyprlock process is not yet a locked screen: the lock
+  # surface still has to come up, and suspending in that gap can
+  # resume to an unlocked desktop. Give it a moment to engage before
+  # reporting success. (A stronger check — logind's LockedHint — was
+  # not used: whether hyprlock sets it still needs a live-session
+  # test, and a wrong gate here would refuse every suspend.)
+  sleep 0.5
+  return 0
+}
+
 choice="$(printf 'Lock\nLogout\nSuspend\nReboot\nPower off' | rofi -dmenu -p "Power" -i)" || exit 0
 case "$choice" in
-  "Lock")      hyprlock ;;
-  "Logout")    hyprctl dispatch exit ;;
-  "Suspend")   hyprlock & sleep 1; systemctl suspend ;;
-  "Reboot")    systemctl reboot ;;
-  "Power off") systemctl poweroff ;;
+  "Lock")      lock_screen ;;
+  "Logout")    if confirm "Logout?"; then hyprctl dispatch 'hl.dsp.exit()' || notify "Logout failed."; fi ;;
+  "Suspend")   lock_screen && { systemctl suspend || notify "Suspend failed."; } ;;
+  "Reboot")    if confirm "Reboot?"; then systemctl reboot || notify "Reboot failed."; fi ;;
+  "Power off") if confirm "Power off?"; then systemctl poweroff || notify "Power off failed."; fi ;;
   *) exit 0 ;;
 esac

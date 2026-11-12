@@ -6,22 +6,66 @@ set -euo pipefail
 
 TERMINAL="${SIMORGH_TERMINAL:-kitty}"
 
+# spawn_checked <bash -c string> — open a terminal window running the
+# command and set SPAWN_OK=1 only if the terminal is still alive a
+# moment later. A backgrounded terminal that dies instantly (e.g. no
+# display) used to be reported as "Installing ..." with nothing ever
+# appearing, so callers only notify when SPAWN_OK=1.
+spawn_checked() {
+  "$TERMINAL" -e bash -c "$1" &
+  local pid=$!
+  # 0.5 s, not 0.2 s: a terminal that dies just after 0.2 s (a late
+  # startup crash) used to be reported as "Installing ..." with
+  # nothing appearing. Still a heuristic — a terminal can die later
+  # still — but the wider window covers the common late failures.
+  sleep 0.5
+  if kill -0 "$pid" 2>/dev/null; then SPAWN_OK=1; else SPAWN_OK=0; fi
+}
+
 run_in_terminal() {
   # run_in_terminal <package...> — install in a visible terminal window
+  # Sets INSTALL_STARTED=1 when the install actually started, 0 when it
+  # bailed early (yay missing) or failed in the foreground: callers only
+  # notify "Installing ..." when it started.
   local pkgs=("$@")
+  INSTALL_STARTED=0
+  if ! command -v yay >/dev/null; then
+    notify "yay is not installed — cannot install ${pkgs[*]}. Re-run install.sh or install yay first."
+    echo "simorgh-menu: yay is not installed; cannot install: ${pkgs[*]}" >&2
+    return 0
+  fi
   # Docker needs group + service setup after the package install, or
   # every docker command fails with permission denied.
   local docker_setup=""
   if [[ " ${pkgs[*]} " == *" docker "* ]]; then
-    docker_setup="; echo; echo 'Setting up Docker (group + service)...'; sudo usermod -aG docker \"\$USER\" && sudo systemctl enable --now docker && echo 'Docker ready — log out and back in for the group to take effect.'"
+    # &&-chained to the yay install: this must only run when yay
+    # succeeded, or usermod fails on the not-yet-created docker group.
+    # The brace group always exits 0 (its last command is an echo
+    # either way), so a docker-setup failure reports itself instead
+    # of making the whole chain print "Install failed" for packages
+    # that installed fine.
+    docker_setup=" && { echo 'Setting up Docker (group + service)...'; sudo usermod -aG docker \"\$USER\" && sudo systemctl enable --now docker && echo 'Docker ready — log out and back in for the group to take effect.' || echo 'Docker setup failed — the packages installed, but the docker group/service setup did not.'; }"
   fi
   if command -v "$TERMINAL" >/dev/null; then
-    "$TERMINAL" -e bash -c "yay -S --noconfirm --needed ${pkgs[*]}$docker_setup; echo; read -n1 -s -r -p 'Done. Press any key to close.'" &
+    # The closing prompt reports the real outcome instead of a blanket
+    # "Done" on failure (same as the Maia branch below).
+    spawn_checked "yay -S --noconfirm --needed ${pkgs[*]}$docker_setup && echo 'Install succeeded.' || echo 'Install failed.'; echo; read -n1 -s -r -p 'Press any key to close.'"
+    INSTALL_STARTED="$SPAWN_OK"
+    if [[ "$SPAWN_OK" -eq 0 ]]; then
+      notify "Could not open a terminal — install of ${pkgs[*]} did not start."
+    fi
   else
-    yay -S --noconfirm --needed "${pkgs[@]}"
-    if [[ -n "$docker_setup" ]]; then
-      sudo usermod -aG docker "$USER" && sudo systemctl enable --now docker
-      notify "Docker ready — log out and back in for the group to take effect."
+    if yay -S --noconfirm --needed "${pkgs[@]}"; then
+      INSTALL_STARTED=1
+      if [[ -n "$docker_setup" ]]; then
+        if sudo usermod -aG docker "${USER:-$(id -un)}" && sudo systemctl enable --now docker; then
+          notify "Docker ready — log out and back in for the group to take effect."
+        else
+          notify "Docker setup failed — the packages installed, but the docker group/service setup did not."
+        fi
+      fi
+    else
+      notify "Install failed: ${pkgs[*]}"
     fi
   fi
 }
@@ -53,7 +97,7 @@ pick_and_install() { # pick_and_install <prompt> <"Label|pkg ..." ...>
       [[ "$pkg" == "-" ]] && return 0
       # shellcheck disable=SC2086
       run_in_terminal $pkg
-      notify "Installing $choice..."
+      if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing $choice..."; fi
       return 0
     fi
   done
@@ -67,14 +111,28 @@ install_maia() {
   fi
   local url="https://github.com/yappologistic/Maia/releases/latest/download/maia-linux-x86_64"
   if command -v "$TERMINAL" >/dev/null; then
-    "$TERMINAL" -e bash -c "cd \$(mktemp -d) && curl -fsSL -O $url && chmod +x maia-linux-x86_64 && ./maia-linux-x86_64 --install && maia --set-default; echo; read -n1 -s -r -p 'Done. Press any key to close.'" &
+    # Temp dir cleaned by the trap; the closing prompt reports the real
+    # outcome instead of a blanket "Done" on failure. --set-default is
+    # a separate step: it failing must not report the install itself
+    # as failed (it only sets the default file manager).
+    spawn_checked "tmp=\$(mktemp -d); trap 'rm -rf \"\$tmp\"' EXIT; cd \"\$tmp\" && curl -fsSL -O $url && chmod +x maia-linux-x86_64 && ./maia-linux-x86_64 --install && echo 'Maia installed.' || echo 'Maia install failed.'; maia --set-default 2>/dev/null || true; echo; read -n1 -s -r -p 'Press any key to close.'"
+    if [[ "$SPAWN_OK" -eq 1 ]]; then
+      notify "Installing Maia..."
+    else
+      notify "Could not open a terminal — Maia install did not start."
+    fi
   else
-    local tmp
-    tmp="$(mktemp -d)"
-    (cd "$tmp" && curl -fsSL -O "$url" && chmod +x maia-linux-x86_64 && ./maia-linux-x86_64 --install && maia --set-default)
+    local tmp ok=0
+    tmp="$(mktemp -d)" || { notify "Could not create a temporary directory — Maia install did not start."; return 0; }
+    (cd "$tmp" && curl -fsSL -O "$url" && chmod +x maia-linux-x86_64 && ./maia-linux-x86_64 --install) && ok=1
     rm -rf "$tmp"
+    if [[ $ok -eq 1 ]]; then
+      maia --set-default 2>/dev/null || true
+      notify "Maia installed."
+    else
+      notify "Maia install failed."
+    fi
   fi
-  notify "Installing Maia..."
 }
 
 install_sung() {
@@ -85,23 +143,66 @@ install_sung() {
     return 0
   fi
   if command -v "$TERMINAL" >/dev/null; then
-    "$TERMINAL" -e bash -c 'mkdir -p "$HOME/.local/src"; if [[ -d "$HOME/.local/src/Sung/.git" ]]; then (cd "$HOME/.local/src/Sung" && git pull --ff-only); else git clone https://github.com/yappologistic/Sung.git "$HOME/.local/src/Sung"; fi; (cd "$HOME/.local/src/Sung" && ./scripts/install.sh); echo; read -n1 -s -r -p "Done. Press any key to close."' &
-  else
-    mkdir -p "$HOME/.local/src"
-    if [[ -d "$HOME/.local/src/Sung/.git" ]]; then
-      (cd "$HOME/.local/src/Sung" && git pull --ff-only)
+    # A failed clone leaves a half-created directory behind, and
+    # `git clone` refuses to clone into a non-empty one — every later
+    # attempt would fail the same way until it was deleted by hand.
+    # Remove it, but only when the clone created it. The install step
+    # runs only when the clone/pull just succeeded (sung_ok): a
+    # stale/partial checkout — e.g. a failed pull, or a clone that
+    # died leaving a .git behind — must not get its install.sh run.
+    spawn_checked 'mkdir -p "$HOME/.local/src"; sung_ok=0; if [[ -d "$HOME/.local/src/Sung/.git" ]]; then (cd "$HOME/.local/src/Sung" && git pull --ff-only) && sung_ok=1 || echo "Sung update failed."; else had_sung_dir=0; [[ -e "$HOME/.local/src/Sung" ]] && had_sung_dir=1; git clone https://github.com/yappologistic/Sung.git "$HOME/.local/src/Sung" && sung_ok=1 || { echo "Sung download failed."; [[ $had_sung_dir -eq 0 ]] && rm -rf "$HOME/.local/src/Sung"; }; fi; if [[ $sung_ok -eq 1 ]]; then (cd "$HOME/.local/src/Sung" && ./scripts/install.sh) || echo "Sung install failed."; fi; echo; read -n1 -s -r -p "Press any key to close."'
+    if [[ "$SPAWN_OK" -eq 1 ]]; then
+      notify "Installing Sung..."
     else
-      git clone https://github.com/yappologistic/Sung.git "$HOME/.local/src/Sung"
+      notify "Could not open a terminal — Sung install did not start."
     fi
-    (cd "$HOME/.local/src/Sung" && ./scripts/install.sh)
+  else
+    mkdir -p "$HOME/.local/src" || { notify "Could not create ~/.local/src — Sung install did not start."; return 0; }
+    # Like the terminal branch above, the install step runs only when
+    # the clone/pull just succeeded (sung_ok): a failed pull must not
+    # get its install.sh run on the stale checkout.
+    local sung_ok=0
+    if [[ -d "$HOME/.local/src/Sung/.git" ]]; then
+      if (cd "$HOME/.local/src/Sung" && git pull --ff-only); then
+        sung_ok=1
+      else
+        notify "Could not update Sung; keeping the existing checkout."
+      fi
+    else
+      # A failed clone leaves a half-created directory behind, and
+      # `git clone` refuses to clone into a non-empty one — every
+      # later attempt would fail the same way until it was deleted
+      # by hand. Remove it, but only when the clone created it: a
+      # directory that was already there may hold the user's files.
+      local sung_had_dir=0
+      [[ -e "$HOME/.local/src/Sung" ]] && sung_had_dir=1
+      git clone https://github.com/yappologistic/Sung.git "$HOME/.local/src/Sung" || {
+        notify "Could not download Sung — check your network and try again."
+        [[ "$sung_had_dir" -eq 0 ]] && rm -rf "$HOME/.local/src/Sung"
+        return 0
+      }
+      sung_ok=1
+    fi
+    if [[ "$sung_ok" -eq 1 ]]; then
+      if (cd "$HOME/.local/src/Sung" && ./scripts/install.sh); then
+        notify "Sung installed."
+      else
+        notify "Sung install failed."
+      fi
+    fi
   fi
-  notify "Installing Sung..."
 }
 
 install_soundcloud() {
   # No official SoundCloud Linux app: add it as a Chromium web app.
-  mkdir -p "$HOME/.local/share/applications"
-  cat > "$HOME/.local/share/applications/soundcloud.desktop" <<'EOF'
+  # Both writes are essential to the "added" notify below — a failure
+  # must say so instead of aborting silently under `set -e`.
+  mkdir -p "$HOME/.local/share/applications" || {
+    notify "Could not add the SoundCloud web app — could not create ~/.local/share/applications."
+    echo "simorgh-menu: could not create ~/.local/share/applications for the SoundCloud web app." >&2
+    return 0
+  }
+  if ! cat > "$HOME/.local/share/applications/soundcloud.desktop" <<'EOF'; then
 [Desktop Entry]
 Name=SoundCloud
 Comment=SoundCloud as a web app (Chromium)
@@ -111,6 +212,10 @@ Type=Application
 Categories=AudioVideo;Audio;
 StartupNotify=true
 EOF
+    notify "Could not add the SoundCloud web app — could not write soundcloud.desktop."
+    echo "simorgh-menu: could not write ~/.local/share/applications/soundcloud.desktop." >&2
+    return 0
+  fi
   notify "SoundCloud web app added."
 }
 
@@ -121,11 +226,21 @@ install_flatpak() {
     return 0
   fi
   if command -v "$TERMINAL" >/dev/null; then
-    "$TERMINAL" -e bash -c "sudo pacman -S --needed --noconfirm flatpak && flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo; echo; read -n1 -s -r -p 'Done. Press any key to close.'" &
+    # The closing prompt reports the real outcome instead of a blanket
+    # "Done" on failure (same as the Maia branch above).
+    spawn_checked "sudo pacman -S --needed --noconfirm flatpak && flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && echo 'Flatpak + Flathub installed.' || echo 'Flatpak install failed.'; echo; read -n1 -s -r -p 'Press any key to close.'"
+    if [[ "$SPAWN_OK" -eq 1 ]]; then
+      notify "Installing Flatpak + Flathub..."
+    else
+      notify "Could not open a terminal — Flatpak install did not start."
+    fi
   else
-    sudo pacman -S --needed flatpak && flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+    if sudo pacman -S --needed --noconfirm flatpak && flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo; then
+      notify "Flatpak + Flathub installed."
+    else
+      notify "Flatpak install failed."
+    fi
   fi
-  notify "Installing Flatpak + Flathub..."
 }
 
 main_menu() {
@@ -158,7 +273,7 @@ browser_menu() {
     "Chromium (default)") run_in_terminal chromium ;;
     *) return 0 ;;
   esac
-  notify "Installing $choice..."
+  if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing $choice..."; fi
 }
 
 terminal_menu() {
@@ -175,24 +290,22 @@ terminal_menu() {
     "Kitty (default)")  run_in_terminal kitty ;;
     *) return 0 ;;
   esac
-  notify "Installing $choice..."
+  if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing $choice..."; fi
 }
 
 editor_menu() {
   local choice
   choice="$(rofi_menu "Install Editor" \
-    "Neovim" \
     "Zed" \
     "VSCodium" \
     "VS Code (default)")" || return 0
   case "$choice" in
-    "Neovim")           run_in_terminal neovim ;;
     "Zed")              run_in_terminal zed ;;
     "VSCodium")         run_in_terminal vscodium ;;
     "VS Code (default)") run_in_terminal visual-studio-code-bin ;;
     *) return 0 ;;
   esac
-  notify "Installing $choice..."
+  if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing $choice..."; fi
 }
 
 gaming_menu() {
@@ -215,7 +328,7 @@ gaming_menu() {
     "Install all gaming packages") run_in_terminal steam heroic-games-launcher-bin lutris protonup-qt mangohud gamemode mesa lib32-mesa vulkan-icd-loader lib32-vulkan-icd-loader vulkan-radeon vulkan-intel ;;
     *) return 0 ;;
   esac
-  notify "Installing $choice..."
+  if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing $choice..."; fi
 }
 
 filemanager_menu() {
@@ -227,24 +340,27 @@ filemanager_menu() {
     "Nautilus")" || return 0
   case "$choice" in
     "Maia (default)") install_maia ;;
-    "Dolphin")  run_in_terminal dolphin; notify "Installing Dolphin..." ;;
-    "Thunar")   run_in_terminal thunar; notify "Installing Thunar..." ;;
-    "Nautilus") run_in_terminal nautilus; notify "Installing Nautilus..." ;;
+    "Dolphin")  run_in_terminal dolphin; if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing Dolphin..."; fi ;;
+    "Thunar")   run_in_terminal thunar; if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing Thunar..."; fi ;;
+    "Nautilus") run_in_terminal nautilus; if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing Nautilus..."; fi ;;
     *) return 0 ;;
   esac
 }
 
 devtools_menu() {
+  # gcc/make (via base-devel) and python/nodejs are preinstalled by
+  # install.sh — only the packages that are not installed yet are
+  # listed here, matching packages/apps.txt.
   pick_and_install "Dev Tools" \
-    "C/C++ toolchain (gcc, make, gdb)|gcc make gdb" \
-    "Python|python python-pip" \
-    "Node.js|nodejs npm" \
+    "C/C++ debugger (gdb)|gdb" \
+    "Python package installer (pip)|python-pip" \
+    "Node.js package manager (npm)|npm" \
     "Rust (rustup)|rustup" \
     "Go|go" \
     "Docker|docker docker-compose" \
     "lazygit|lazygit" \
     "GitHub CLI|github-cli" \
-    "Install all dev tools|gcc make gdb python python-pip nodejs npm rustup go docker docker-compose lazygit github-cli"
+    "Install all dev tools|gdb python-pip npm rustup go docker docker-compose lazygit github-cli"
 }
 
 apps_menu() {
@@ -293,10 +409,10 @@ app_music() {
     "Rhythmbox")" || return 0
   case "$choice" in
     "Sung (default)")       install_sung ;;
-    "Spotify")              run_in_terminal spotify; notify "Installing Spotify..." ;;
+    "Spotify")              run_in_terminal spotify; if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing Spotify..."; fi ;;
     "SoundCloud (web app)") install_soundcloud ;;
-    "Amberol")              run_in_terminal amberol; notify "Installing Amberol..." ;;
-    "Rhythmbox")            run_in_terminal rhythmbox; notify "Installing Rhythmbox..." ;;
+    "Amberol")              run_in_terminal amberol; if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing Amberol..."; fi ;;
+    "Rhythmbox")            run_in_terminal rhythmbox; if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing Rhythmbox..."; fi ;;
     *) return 0 ;;
   esac
 }
@@ -362,7 +478,7 @@ app_passwords() {
 
 app_bluetooth() {
   pick_and_install "Bluetooth" \
-    "Blueman|blueman"
+    "Blueman (default)|-"
 }
 
 app_calculator() {
@@ -377,6 +493,33 @@ app_tmux() {
 
 main() {
   command -v rofi >/dev/null || { echo "rofi is required for simorgh-menu" >&2; exit 1; }
+  # Most menu items install packages with yay, but the installer is
+  # allowed to finish without it — catch that here, with an offer to
+  # install it, instead of failing on the first install with a bare
+  # "yay: command not found".
+  if ! command -v yay >/dev/null; then
+    notify "yay (AUR helper) is not installed — most installs from this menu need it."
+    local yay_choice=""
+    yay_choice="$(printf 'Install yay now\nContinue without yay' | rofi -dmenu -p "yay is missing" -i)" || yay_choice=""
+    if [[ "$yay_choice" == "Install yay now" ]]; then
+      if command -v "$TERMINAL" >/dev/null; then
+        # Foreground (no `&`): the menu must not continue until yay is
+        # installed. Backgrounding this terminal raced the first
+        # install pick — the user could pick a package while makepkg
+        # was still running, and run_in_terminal then failed with
+        # "yay is not installed". The terminal closes on keypress.
+        # `|| true`: a closed/killed terminal must not kill the menu
+        # under `set -e` — the check below reports the outcome.
+        "$TERMINAL" -e bash -c 'tmp=$(mktemp -d); trap "rm -rf $tmp" EXIT; git clone --depth 1 https://aur.archlinux.org/yay.git "$tmp/yay" && (cd "$tmp/yay" && makepkg -si --noconfirm) && echo "yay installed." || echo "yay install failed."; echo; read -n1 -s -r -p "Press any key to close."' || true
+        command -v yay >/dev/null || notify "yay install failed — most installs from this menu need it."
+      else
+        local tmp
+        tmp="$(mktemp -d)" || { notify "Could not create a temporary directory — yay install did not start."; return 0; }
+        (git clone --depth 1 https://aur.archlinux.org/yay.git "$tmp/yay" && (cd "$tmp/yay" && makepkg -si --noconfirm)) || notify "yay install failed."
+        rm -rf "$tmp"
+      fi
+    fi
+  fi
   local choice
   choice="$(main_menu)" || exit 0
   case "$choice" in
@@ -392,18 +535,30 @@ main() {
     *"Install Flatpak")       install_flatpak ;;
     *"Update Simorgh")
       if command -v "$TERMINAL" >/dev/null; then
-        "$TERMINAL" -e bash -c "simorgh-update; echo; read -n1 -s -r -p 'Done. Press any key to close.'" &
+        spawn_checked "simorgh-update && echo 'Simorgh updated.' || echo 'Simorgh update failed.'; echo; read -n1 -s -r -p 'Press any key to close.'"
+        if [[ "$SPAWN_OK" -eq 1 ]]; then
+          notify "Updating Simorgh..."
+        else
+          notify "Could not open a terminal — Simorgh update did not start."
+        fi
       else
-        simorgh-update
-      fi
-      notify "Updating Simorgh..." ;;
+        simorgh-update || notify "Simorgh update failed."
+      fi ;;
     *"Update System")
-      if command -v "$TERMINAL" >/dev/null; then
-        "$TERMINAL" -e bash -c "yay -Syu; echo; read -n1 -s -r -p 'Done. Press any key to close.'" &
+      if ! command -v yay >/dev/null; then
+        notify "yay is not installed — cannot update the system."
       else
-        yay -Syu
-      fi
-      notify "Updating system..." ;;
+        if command -v "$TERMINAL" >/dev/null; then
+          spawn_checked "yay -Syu && echo 'System updated.' || echo 'System update failed.'; echo; read -n1 -s -r -p 'Press any key to close.'"
+          if [[ "$SPAWN_OK" -eq 1 ]]; then
+            notify "Updating system..."
+          else
+            notify "Could not open a terminal — system update did not start."
+          fi
+        else
+          yay -Syu || notify "System update failed."
+        fi
+      fi ;;
     *) exit 0 ;;
   esac
 }

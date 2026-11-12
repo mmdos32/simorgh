@@ -106,7 +106,7 @@
 
     "custom/weather": {
         "format": "{}",
-        "exec": "curl -s 'wttr.in/?format=1' 2>/dev/null || echo 'weather offline'",
+        "exec": "curl -s --max-time 10 'wttr.in/?format=1' 2>/dev/null || echo 'weather offline'",
         "interval": 1800,
         "tooltip-format": "Weather from wttr.in (updates every 30 min)"
     },
@@ -115,7 +115,7 @@
         "format": "󰏔 {}",
         "exec": "checkupdates 2>/dev/null | wc -l",
         "interval": 1800,
-        "on-click": "kitty -e bash -c 'yay -Syu; echo; read -n1 -s -r -p \"Done. Press any key to close.\"'",
+        "on-click": "kitty -e bash -c 'if command -v yay >/dev/null; then yay -Syu; else sudo pacman -Syu; fi; echo; read -n1 -s -r -p \"Done. Press any key to close.\"'",
         "tooltip-format": "{} pending updates (click to update)"
     }
 }

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Simorgh live ISO profile (archiso).
 # Build it on Arch Linux with:  sudo ./iso/build.sh
-# It produces a bootable installer image: boot it, run `simorgh-install`,
-# and it installs base Arch (via archinstall) — the Simorgh desktop
-# itself is installed after the first boot by the bootstrap one-liner.
+# It produces a bootable installer image: boot it, and the graphical
+# Calamares installer opens on the live Hyprland desktop and installs
+# Simorgh (via install.sh --chroot in the target). A console fallback
+# (`simorgh-install`, archinstall-based) is still in the image if the
+# graphical session fails to start.
 iso_name="simorgh"
 iso_label="SIMORGH_$(date +%Y%m)"
 iso_publisher="Simorgh <https://github.com/mmdos32/simorgh>"

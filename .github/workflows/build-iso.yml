@@ -9,10 +9,13 @@
 #   2. Pick the branch (ci-test for testing, main for a real build).
 #   3. "Create a GitHub Release" only works from main, and only when
 #      ticked; otherwise the ISO is just uploaded as an artifact.
+#      Re-running with the same version fails unless "Allow overwriting
+#      the existing release" is also ticked.
 #
-# The build runs inside the official archlinux:base-devel container with
-# --privileged (mkarchiso needs loop devices and mounts), exactly like
-# the manual build: sudo ./iso/build.sh (see iso/README.md).
+# The build runs inside the official archlinux:base-devel container,
+# pinned by digest (see the docker run step), with --privileged
+# (mkarchiso needs loop devices and mounts), exactly like the manual
+# build: sudo ./iso/build.sh (see iso/README.md).
 # The Calamares AUR package is cached (iso/repo/) so only the first
 # build pays the compile time.
 name: Build ISO
@@ -25,6 +28,15 @@ on:
         required: false
         default: false
         type: boolean
+      allow_overwrite:
+        description: 'Allow overwriting the existing release for this version'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: build-iso
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -39,26 +51,109 @@ jobs:
           sudo docker image prune -af || true
           df -h
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Read ISO version
         id: version
         run: |
-          echo "version=$(grep -oP 'iso_version="\K[^"]+' iso/profiledef.sh)" >> "$GITHUB_OUTPUT"
+          version="$(grep -oP 'iso_version="\K[^"]+' iso/profiledef.sh || true)"
+          if [[ -z "$version" || ! "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Could not parse a valid iso_version from iso/profiledef.sh (got: '$version')" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check release does not already exist
+        # Fail fast, before the hour-long build, if this version is
+        # already released and overwriting was not allowed.
+        if: ${{ inputs.create_release && github.ref == 'refs/heads/main' && !inputs.allow_overwrite }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Fail closed on any error other than "not found": an auth,
+          # network, or API failure must not be mistaken for "the
+          # release does not exist", or the create step below would
+          # overwrite an existing release in place.
+          if output="$(gh release view "v${{ steps.version.outputs.version }}" --repo "${{ github.repository }}" 2>&1)"; then
+            echo "Release v${{ steps.version.outputs.version }} already exists. Re-run with allow_overwrite to replace it." >&2
+            exit 1
+          elif echo "$output" | grep -qi "404"; then
+            echo "Release v${{ steps.version.outputs.version }} does not exist; proceeding."
+          else
+            echo "Could not check whether release v${{ steps.version.outputs.version }} exists: $output" >&2
+            exit 1
+          fi
+
+      - name: Read Calamares AUR version
+        id: calamares-version
+        # Cache key follows the live AUR pkgver so a Calamares update
+        # invalidates the cache and forces a fresh build. The build
+        # itself still uses the pinned commit in iso/build.sh, so after
+        # an upstream bump, bump CALAMARES_PIN deliberately to ship it.
+        # If the AUR is unreachable, fall back to a pin-only key so a
+        # transient network failure doesn't kill a build that could
+        # reuse the cache.
+        run: |
+          pin="$(grep -oP '^CALAMARES_PIN="\K[^"]+' iso/build.sh)"
+          [[ -n "$pin" ]] || { echo "CALAMARES_PIN not found in iso/build.sh" >&2; exit 1; }
+          pkgver=""; pkgrel=""
+          if curl -fsSL "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=calamares" -o /tmp/calamares-PKGBUILD; then
+            pkgver="$(grep -oP '^pkgver=\K.*' /tmp/calamares-PKGBUILD || true)"
+            pkgrel="$(grep -oP '^pkgrel=\K.*' /tmp/calamares-PKGBUILD || true)"
+          fi
+          if [[ -n "$pkgver" && -n "$pkgrel" ]]; then
+            echo "key=calamares-${pkgver}-${pkgrel}-pin-${pin:0:7}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Could not read the live Calamares pkgver from the AUR; falling back to a pin-only cache key."
+            echo "key=calamares-pin-${pin:0:7}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Cache Calamares package
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: iso/repo
-          key: calamares-3.4.2
+          key: ${{ steps.calamares-version.outputs.key }}
+          # On AUR fetch failure the key falls back to pin-only
+          # (calamares-pin-<7>), which never matches the full
+          # versioned key of a healthy run; the prefix restores
+          # the newest pin-matching cache instead of nothing.
+          restore-keys: |
+            calamares-pin-
 
       - name: Build ISO in Arch container
         run: |
           docker run --privileged --rm \
             -v "${{ github.workspace }}:/build" \
             -w /build \
-            archlinux:base-devel \
-            bash -c 'set -euo pipefail; pacman -Syu --noconfirm archiso git sudo python; useradd -m builder; echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers; sudo -u builder sudo ./iso/build.sh'
+            archlinux:base-devel@sha256:fa2d4ce3310ddd90a4208e5168be8ad367da5129af1245f38fd2d803bcbe3239 \
+            bash -c 'set -euo pipefail; pacman -Syu --noconfirm archiso git sudo python; useradd -m builder; echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers; sudo -u builder sudo ./iso/build.sh; pacman -Q > iso/out/build-packages.txt'
+          # Image pinned by digest (archlinux:base-devel, resolved
+          # 2026-11-11, built 2026-11-09). The -Syu above still pulls
+          # the latest packages, so iso/out/build-packages.txt records
+          # the exact versions this build used.
+
+      - name: Chown build outputs back to the runner
+        # The container runs as root, so everything it wrote into the
+        # checkout (iso/out, iso/work, iso/repo, generated configs) is
+        # root-owned. Hand it back, or the steps below cannot write
+        # into iso/out — and a failed build would leave root-owned
+        # leftovers behind. Runs even when the build failed.
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" iso
+
+      - name: Write ISO checksum
+        run: |
+          cd iso/out
+          # Refuse an ambiguous build: with more than one ISO the
+          # glob below would silently produce a multi-line checksum
+          # file and the release step would upload multiple ISOs.
+          iso_count="$(ls simorgh-*.iso 2>/dev/null | wc -l)"
+          if [[ "$iso_count" -ne 1 ]]; then
+            echo "Expected exactly one .iso in iso/out/, found $iso_count." >&2
+            exit 1
+          fi
+          sha256sum simorgh-*.iso > "simorgh-${{ steps.version.outputs.version }}-x86_64.iso.sha256"
+          cat "simorgh-${{ steps.version.outputs.version }}-x86_64.iso.sha256"
 
       - name: Show ISO checksum
         run: |
@@ -66,16 +161,21 @@ jobs:
           sha256sum iso/out/*.iso
 
       - name: Upload ISO artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: simorgh-iso
-          path: iso/out/*.iso
+          path: |
+            iso/out/*.iso
+            iso/out/*.sha256
+            iso/out/build-packages.txt
           retention-days: 30
 
       - name: Create release
         if: ${{ inputs.create_release && github.ref == 'refs/heads/main' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Simorgh ${{ steps.version.outputs.version }}
-          files: iso/out/*.iso
+          files: |
+            iso/out/*.iso
+            iso/out/*.sha256
