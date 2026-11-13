@@ -95,6 +95,7 @@ system-config-printer
 
 # Core tools the installer and desktop rely on (easy to miss on fresh Arch)
 curl
+diffutils
 pciutils
 xorg-xwayland
 unzip

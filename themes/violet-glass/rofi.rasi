@@ -30,7 +30,7 @@ inputbar {
 
 prompt {
     background-color: transparent;
-    text-color: @accent;
+    text-color: @foreground;
 }
 
 entry {

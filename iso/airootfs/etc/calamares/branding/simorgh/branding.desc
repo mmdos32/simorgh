@@ -23,7 +23,7 @@ windowExpanding:         normal
 windowSize:              1024px,620px
 windowPlacement:         center
 style:
-    sidebarBackground:   "#0d1418"
+    sidebarBackground:   "#14323a"
     sidebarText:         "#e6edf3"
     sidebarTextSelect:   "#0d1418"
     sidebarTextHighlight: "#2dd4bf"

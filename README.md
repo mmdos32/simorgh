@@ -17,7 +17,7 @@ Get the latest release — **v1.0** — from the
 
 ## Install
 
-**From the ISO (recommended download — the install-through itself is still untested, see below):** download the ISO above, write it to a USB
+**From the ISO (recommended download — the full install is not fully verified end-to-end; see below):** download the ISO above, write it to a USB
 stick with balenaEtcher or `dd`, boot it, and the graphical installer
 opens on the desktop. See [the full install guide](manual/01-install.md)
 and [`iso/README.md`](iso/README.md).
@@ -82,10 +82,12 @@ The manual lives in [`manual/`](manual/), which is its authoritative source.
   has run it yet; the Waybar/wallpaper rendering still needs
   real-hardware confirmation.
 - **No README screenshots yet** — they need a live session.
-- **Installing from the ISO is untested.** The ISO is published
-  (v1.0) and boots to the live desktop, but the full graphical
-  install + reboot into the installed system has not been verified
-  end-to-end. The script method stays fully supported.
+- **Installing from the ISO is not fully verified end-to-end.** The ISO is published
+  (v1.0) and boots to the live desktop, and it has been retested twice live:
+  on 2026-11-12 the install failed at unpackfs, and on 2026-11-13 it got past
+  unpackfs AND the bootloader before failing at `shellprocess@keyring` — but
+  the full graphical install + reboot into the installed system has still not
+  been verified end-to-end. The script method stays fully supported.
 - **No light desktop theme** — all six themes are dark and glassy (the installer itself uses a light theme).
 - CJK (Chinese/Japanese/Korean) fonts are not preinstalled; install
   them with `sudo pacman -S noto-fonts-cjk` if you need them.

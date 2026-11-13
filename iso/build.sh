@@ -187,6 +187,14 @@ tar --exclude=.git --exclude=iso/work --exclude=iso/out \
 [[ -d out ]] && { rm -rf out.bak; mv out out.bak; }
 rm -rf work out
 mkarchiso -v -w work -o out .
+# Fail closed if mkarchiso did not produce exactly one ISO: the
+# iso_file assignment below takes the first match, so a stray second
+# ISO in out/ would otherwise be silently used. (The CI workflow has
+# the same count guard; this covers manual local builds too.)
+# The '|| true' keeps 'set -o pipefail' from aborting on the empty
+# glob (ls exits 2 when no .iso exists) before the guard can report it.
+iso_count="$(ls out/*.iso 2>/dev/null | wc -l || true)"
+[[ "$iso_count" -eq 1 ]] || { echo "Expected exactly one .iso in out/, found $iso_count." >&2; exit 1; }
 iso_file="$(ls out/*.iso 2>/dev/null | head -n 1 || true)"
 [[ -n "$iso_file" ]] || { echo "mkarchiso finished but no ISO was produced in out/" >&2; exit 1; }
 rm -rf out.bak

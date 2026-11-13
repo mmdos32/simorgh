@@ -20,12 +20,12 @@ QLabel {
  * 80x80 logo label. Keep these colors in sync with branding.desc
  * style:. */
 QWidget#sidebarApp {
-    background-color: #0d1418;
+    background-color: #14323a;
     color: #e6edf3;
 }
 
 QWidget#sidebarApp QTreeView {
-    background-color: #0d1418;
+    background-color: #14323a;
     color: #e6edf3;
     border: none;
 }
@@ -62,7 +62,7 @@ QPushButton:disabled {
 
 QPushButton:flat {
     background-color: transparent;
-    color: #0e7490;
+    color: #0d5c6e;
 }
 
 QLineEdit, QComboBox, QSpinBox, QTextEdit {

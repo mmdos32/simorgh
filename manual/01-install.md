@@ -6,7 +6,7 @@ Simorgh is available both as a bootable installer ISO and as an install script p
 There are two ways to install Simorgh. The ISO is the real-OS way;
 the script is for people who already have Arch.
 
-### From the ISO (recommended — but the install-through is still untested; see the note below)
+### From the ISO (recommended — but the full install is not fully verified end-to-end; see the note below)
 
 1. Download the ISO from the [v1.0 release](https://github.com/mmdos32/simorgh/releases/download/v1.0/simorgh-1.0-x86_64.iso)
    (~1.5 GB) — or build it yourself on Arch Linux with

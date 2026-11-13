@@ -1,5 +1,6 @@
 /* Simorgh theme: violet-glass — Waybar colors (replaces config/waybar/theme.css) */
 @define-color accent #a78bfa;
+@define-color on-accent #14101d;
 @define-color accent-dim rgba(167, 139, 250, 0.25);
 @define-color bg rgba(20, 16, 29, 0.65);
 @define-color module-bg rgba(255, 255, 255, 0.06);

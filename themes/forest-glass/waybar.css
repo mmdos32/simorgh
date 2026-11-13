@@ -1,5 +1,6 @@
 /* Simorgh theme: forest-glass — Waybar colors (replaces config/waybar/theme.css) */
 @define-color accent #4ade80;
+@define-color on-accent #0f1a12;
 @define-color accent-dim rgba(74, 222, 128, 0.25);
 @define-color bg rgba(15, 26, 18, 0.65);
 @define-color module-bg rgba(255, 255, 255, 0.06);

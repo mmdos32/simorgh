@@ -1,7 +1,7 @@
 /* Simorgh theme: teal-glass — Rofi colors (replaces config/rofi/theme.rasi) */
 * {
     accent: #2dd4bf;
-    background: rgba (13, 20, 24, 65%);
+    background: rgba (13, 20, 24, 75%);
     background-alt: rgba (255, 255, 255, 6%);
     foreground: #e6edf3;
     selected: #2dd4bf;
@@ -30,7 +30,7 @@ inputbar {
 
 prompt {
     background-color: transparent;
-    text-color: @accent;
+    text-color: @foreground;
 }
 
 entry {

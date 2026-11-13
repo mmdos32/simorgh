@@ -15,8 +15,8 @@
 | Image viewer   | Loupe                                | Eye of GNOME (eog), imv                        |
 | System monitor | btop                                 | Mission Center                                   |
 | Archive        | File Roller                          | —                                                |
-| Gaming         | —                                    | Steam, Heroic, Lutris, ProtonUp-Qt, MangoHud, GameMode |
 | Dev tools      | C/C++ toolchain (gcc, make), Python + Node.js (preinstalled; the rest one click away in the menu) | C/C++ toolchain (adds gdb), Python pip, npm, Rust (rustup), Go, Docker (+ Compose), lazygit, GitHub CLI |
+| Gaming         | —                                    | Steam, Heroic, Lutris, ProtonUp-Qt, MangoHud, GameMode |
 
 ## Maia
 

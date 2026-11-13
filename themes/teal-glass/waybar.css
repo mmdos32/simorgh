@@ -1,5 +1,6 @@
 /* Simorgh theme: teal-glass — Waybar colors (replaces config/waybar/theme.css) */
 @define-color accent #2dd4bf;
+@define-color on-accent #0d1418;
 @define-color accent-dim rgba(45, 212, 191, 0.25);
 @define-color bg rgba(13, 20, 24, 0.65);
 @define-color module-bg rgba(255, 255, 255, 0.06);

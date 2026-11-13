@@ -86,20 +86,20 @@ USER_HOME="/home/$LIVE_USER"
 # --- Desktop config (from the repo) ------------------------------------------
 # The live session uses the same configs the installed system gets.
 if [[ -d "$REPO_DIR/config" ]]; then
-  mkdir -p "$USER_HOME/.config" "$USER_HOME/.local/share/simorgh" "$USER_HOME/.local/bin"
+  mkdir -p "$USER_HOME/.config" "$USER_HOME/.local/share/simorgh" "$USER_HOME/.local/bin" || echo "simorgh-live-setup: WARNING: could not create live home directories" >&2
   for cfg in hypr waybar rofi kitty swaync zsh; do
     # Copy contents (not the directory itself, as install.sh does), so a
     # re-run overwrites instead of nesting .config/hypr/hypr/… inside
     # the existing directory. (Plain `cp -rT` fails when the source path
     # is a symlink to a directory.)
-    [[ -d "$REPO_DIR/config/$cfg" ]] && { mkdir -p "$USER_HOME/.config/$cfg"; cp -r "$REPO_DIR/config/$cfg/." "$USER_HOME/.config/$cfg/"; }
+    [[ -d "$REPO_DIR/config/$cfg" ]] && { mkdir -p "$USER_HOME/.config/$cfg" || echo "simorgh-live-setup: WARNING: could not create $USER_HOME/.config/$cfg" >&2; cp -r "$REPO_DIR/config/$cfg/." "$USER_HOME/.config/$cfg/" || echo "simorgh-live-setup: WARNING: $cfg config copy failed, live session may miss it" >&2; }
   done
   # Live user's own tools (same layout install.sh deploys: bin/ under
   # ~/.local/share/simorgh, symlinked into ~/.local/bin). Without this,
-  # SUPER+M/T/K/SHIFT+E/ALT+R call commands that do not exist live.
+  # SUPER+T/K/SHIFT+E/ALT+R call commands that do not exist live.
   if [[ -d "$REPO_DIR/bin" ]]; then
     mkdir -p "$USER_HOME/.local/share/simorgh/bin"
-    cp -r "$REPO_DIR/bin/." "$USER_HOME/.local/share/simorgh/bin/"
+    cp -r "$REPO_DIR/bin/." "$USER_HOME/.local/share/simorgh/bin/" || echo "simorgh-live-setup: WARNING: live tools copy failed, SUPER+T/K will not work" >&2
     for tool in simorgh-menu simorgh-theme simorgh-update simorgh-power simorgh-keybinds simorgh-record simorgh-welcome; do
       [[ -e "$USER_HOME/.local/share/simorgh/bin/$tool" ]] && ln -sf "$USER_HOME/.local/share/simorgh/bin/$tool" "$USER_HOME/.local/bin/$tool"
     done
@@ -114,6 +114,7 @@ if [[ -d "$REPO_DIR/config" ]]; then
         -e '/Chromium browser/d' \
         -e '/VS Code editor/d' \
         -e '/Sung music player/d' \
+        -e '/Simorgh menu/d' \
         -e '/Notifications center/d' \
         -e '/Do Not Disturb/d' \
         -e '/Calculator (Rofi)/d' \
@@ -144,7 +145,7 @@ if [[ -d "$REPO_DIR/config" ]]; then
       sed -i 's/(lock\/suspend\/reboot\/power off)/(lock\/reboot\/power off)/' "$kb"
       grep -q '^SUPER + I — Reopen the installer' "$kb" || echo "simorgh-live-setup: WARNING: live keybinds guide is missing the SUPER+I line" >&2
       grep -q '^SUPER + W — Join Wi-Fi (nmtui)' "$kb" || echo "simorgh-live-setup: WARNING: live keybinds guide is missing the SUPER+W line" >&2
-      if grep -qiE 'maia|chromium|vs code|sung|notifications|do not disturb|calculator|color picker|screen recording|waybar|emoji picker|scratchpad|logout|suspend' "$kb"; then
+      if grep -qiE 'maia|chromium|vs code|sung|simorgh menu|notifications|do not disturb|calculator|color picker|screen recording|waybar|emoji picker|scratchpad|logout|suspend' "$kb"; then
         echo "simorgh-live-setup: WARNING: live keybinds guide still lists a dead-live shortcut" >&2
       fi
     fi
@@ -163,6 +164,9 @@ if [[ -d "$REPO_DIR/config" ]]; then
       # reason). Same pattern as the Logout strip above.
       sed -i 's/\\nSuspend//' "$pw"
       sed -i '/^  "Suspend")/d' "$pw"
+      # The header comment still lists the stripped entries — reword
+      # it to the live menu, same as the keybinds guide above.
+      sed -i 's/lock, logout, suspend, reboot, power off/lock, reboot, power off/' "$pw"
       grep -q 'Logout' "$pw" && echo "simorgh-live-setup: WARNING: live power menu still lists Logout" >&2 || true
       # 'Suspend' bare would false-positive on the hyprlock notify
       # ("Lock and Suspend will not lock the screen"), so check the
@@ -172,7 +176,7 @@ if [[ -d "$REPO_DIR/config" ]]; then
       fi
     fi
   fi
-  [[ -f "$REPO_DIR/config/starship.toml" ]] && cp "$REPO_DIR/config/starship.toml" "$USER_HOME/.config/starship.toml"
+  [[ -f "$REPO_DIR/config/starship.toml" ]] && { cp "$REPO_DIR/config/starship.toml" "$USER_HOME/.config/starship.toml" || echo "simorgh-live-setup: WARNING: starship.toml copy failed" >&2; }
   [[ -e "$USER_HOME/.zshrc" ]] || ln -sf "$USER_HOME/.config/zsh/.zshrc" "$USER_HOME/.zshrc"
   mkdir -p "$USER_HOME/.local/share/simorgh/themes" "$USER_HOME/.local/share/simorgh/wallpapers"
   # These two copies used to fail silently (2>/dev/null + || true): theme
@@ -186,7 +190,7 @@ if [[ -d "$REPO_DIR/config" ]]; then
   # Default theme files (hyprland.lua loads themes/active.lua via require).
   mkdir -p "$USER_HOME/.config/hypr/themes"
   if [[ -f "$REPO_DIR/config/hypr/themes/active.lua" ]]; then
-    cp "$REPO_DIR/config/hypr/themes/active.lua" "$USER_HOME/.config/hypr/themes/active.lua"
+    cp "$REPO_DIR/config/hypr/themes/active.lua" "$USER_HOME/.config/hypr/themes/active.lua" || echo "simorgh-live-setup: WARNING: repo hypr theme active.lua copy failed, live session keeps teal defaults" >&2
   else
     # Was silently skipped: the live hyprland.lua ends with
     # require("themes.active"), so a missing file would fail at session
@@ -272,7 +276,7 @@ EOF
     exit 1
   fi
   if [[ -f "$REPO_DIR/config/hypr/hyprland.lua" ]]; then
-    cp "$REPO_DIR/config/hypr/hyprland.lua" "$tmp_lua"
+    cp "$REPO_DIR/config/hypr/hyprland.lua" "$tmp_lua" || { write_live_fallback "live hyprland.lua copy failed"; exit 1; }
     # Installer-only session: strip the desktop autostart lines, one exact
     # line each. (The old `grep -v simorgh-welcome` also deleted the
     # welcome window-rule's name/match lines, leaving a rule with no
@@ -324,11 +328,15 @@ EOF
     # SUPER+SHIFT+Q (exit) and SUPER+SHIFT+L (lock + suspend) are stubbed
     # too: either kills or suspends Hyprland mid-install, and SDDM
     # autologins straight back into the installer-only session.
+    # SUPER+M is stubbed too: simorgh-menu's yay-install rescue cannot
+    # work live (no yay/toolchain in the live image), so the menu is
+    # unreachable live instead of guarded inside the menu.
     sed -i \
       -e '/hl\.dsp\.exec_cmd("maia")/d' \
       -e '/hl\.dsp\.exec_cmd("chromium")/d' \
       -e '/hl\.dsp\.exec_cmd("code")/d' \
       -e '/hl\.dsp\.exec_cmd("sung")/d' \
+      -e '/hl\.dsp\.exec_cmd("simorgh-menu")/d' \
       -e '/swaync-client/d' \
       -e '/hl\.dsp\.exec_cmd("rofi -show calc")/d' \
       -e '/hyprpicker/d' \
@@ -347,7 +355,7 @@ EOF
     # check above): they look for the command name inside any exec_cmd
     # or dsp call, so they still catch a line the exact-match sed above
     # missed — checking for the exact string would be circular.
-    for stubbed in 'exec_cmd\(.*"maia"' 'exec_cmd\(.*"chromium"' 'exec_cmd\(.*"code"' 'exec_cmd\(.*"sung"' 'swaync-client' 'exec_cmd\(.*calc' 'hyprpicker' 'exec_cmd\(.*emoji' 'simorgh-record' 'pkill -SIGUSR1 waybar' 'toggle_special.*scratchpad' 'dsp\.exit' 'systemctl suspend'; do
+    for stubbed in 'exec_cmd\(.*"maia"' 'exec_cmd\(.*"chromium"' 'exec_cmd\(.*"code"' 'exec_cmd\(.*"sung"' 'exec_cmd\(.*"simorgh-menu"' 'swaync-client' 'exec_cmd\(.*calc' 'hyprpicker' 'exec_cmd\(.*emoji' 'simorgh-record' 'pkill -SIGUSR1 waybar' 'toggle_special.*scratchpad' 'dsp\.exit' 'systemctl suspend'; do
       if grep -qE "$stubbed" "$tmp_lua"; then
         echo "simorgh-live-setup: WARNING: live keybind stub missed $stubbed in hyprland.lua" >&2
       fi

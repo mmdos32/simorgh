@@ -39,7 +39,7 @@ if [[ -d "$TARGET/.git" ]]; then
   # unchanged so the error message shows the real origin.
   remote_norm="${remote,,}"
   while [[ "$remote_norm" == */ ]]; do remote_norm="${remote_norm%/}"; done
-  if [[ -n "$remote_norm" && ! "$remote_norm" =~ (^|[@/])github\.com[:/]mmdos32/simorgh(\.git)?$ ]]; then
+  if [[ -n "$remote_norm" && ! "$remote_norm" =~ ^((https?|ssh)://([^@/]+@)?|git@)?github\.com[:/]mmdos32/simorgh(\.git)?$ ]]; then
     echo "Error: $TARGET is not the Simorgh repo (origin: $remote)." >&2
     echo "Move or delete it first, then run the installer again." >&2
     exit 1

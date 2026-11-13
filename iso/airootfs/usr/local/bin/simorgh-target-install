@@ -60,7 +60,8 @@ info "Locale: $LOCALE"
 # empty keyring, so testing it never detects a keyring with no Arch
 # master keys — and the later `pacman -S linux` then fails on signature
 # verification instead. --populate is idempotent, so just run it.
-pacman-key --init --populate archlinux || warn "pacman-key populate failed; package installs may fail."
+pacman-key --init || warn "pacman-key init failed; package installs may fail."
+pacman-key --populate archlinux || warn "pacman-key populate failed; package installs may fail."
 
 # --- The Simorgh install -----------------------------------------------------
 [[ -x "$REPO_DIR/install.sh" ]] || { echo "Simorgh repo not found at $REPO_DIR." >&2; exit 1; }
@@ -121,11 +122,533 @@ fi
 # system would autologin a nonexistent liveuser and recreate it on
 # first boot (with passwordless sudo).
 
+# --- LUKS/LVM boot fix (I36-C1) -------------------------------------------
+# A LUKS-encrypted install used to produce an unbootable system: nothing
+# ever added the unlock hooks to the target's initramfs, and nothing put
+# the unlock parameters on the kernel command line. configure_luks_boot
+# (called just below, before the forced kernel reinstall) fixes both,
+# using only files Calamares has already written by this point in the
+# sequence (fstab, crypttab, mkinitcpio.conf, /etc/default/grub) and only
+# tools already in the target (blkid, lsblk, grub-mkconfig). cryptsetup and lvm2
+# are already in the target via unpackfs, and lsblk ships with base
+# (util-linux), so no package change is needed.
+#
+# Evidence for each piece (verified against upstream source, not assumed):
+#  (1) /etc/crypttab: Calamares' fstab module DOES write it — its
+#      generate_crypttab() writes one line per partition with
+#      luksMapperName+luksUuid ("<name> UUID=<luksUuid> none <options>"),
+#      including the root partition. But that alone cannot unlock root:
+#      mkinitcpio's sd-encrypt install hook copies into the initramfs
+#      ONLY /etc/crypttab lines marked x-initrd.attach (or the deprecated
+#      /etc/crypttab.initramfs) — Calamares writes neither — and
+#      systemd-cryptsetup-generator(8) activates, in the initrd, only the
+#      UUIDs named on the kernel command line when a crypttab exists.
+#      So the root unlock MUST come from the cmdline (rd.luks.name=),
+#      and /etc/crypttab is left exactly as Calamares wrote it: it still
+#      handles every non-root encrypted mount after boot.
+#  (2) Kernel cmdline: Simorgh boots with GRUB, and Calamares'
+#      bootloader module in its GRUB path only runs grub-install +
+#      grub-mkconfig from /etc/default/grub — it adds no crypt parameters
+#      (its cryptdevice=/rd.luks.uuid handling lives only in the
+#      systemd-boot path, which Simorgh does not use). So this function
+#      appends "rd.luks.name=<uuid>=<mapper> root=<root device>" to
+#      GRUB_CMDLINE_LINUX and regenerates grub.cfg itself — the bootloader
+#      step already ran, so nobody else will do it. rd.luks.name (not
+#      rd.luks.uuid) is used so the mapper name matches fstab/crypttab
+#      instead of the default "luks-<uuid>". grub-mkconfig already emits
+#      root=UUID=<fs-uuid> before GRUB_CMDLINE_LINUX; the later root= on
+#      the kernel command line wins, which is the pattern every Arch
+#      LUKS+GRUB guide uses. /boot is expected unencrypted (Calamares'
+#      auto layout keeps it that way); an encrypted /boot is warned
+#      about but not handled — GRUB would need GRUB_ENABLE_CRYPTODISK=y
+#      and LUKS1, which is out of scope here.
+#  (3) Hook placement: the stock config is systemd-based
+#      (base systemd autodetect microcode modconf kms keyboard sd-vconsole
+#      block filesystems fsck), so the matching hooks are sd-encrypt /
+#      lvm2 — the busybox encrypt hook is WRONG here (encrypt is
+#      documented incompatible with the systemd hook). The lvm2 hook
+#      is NOT busybox-only: it is systemd-aware (its build() checks for
+#      add_systemd_unit and adds the systemd 69-dm-lvm.rules), and the
+#      Arch wiki LVM-on-LUKS guide uses "block sd-encrypt lvm2
+#      filesystems". (There is no systemd-flavoured LVM hook by
+#      that other name in mkinitcpio 42.2.)
+#      Placement is after "block", before "filesystems": LVM-on-LUKS
+#      (the usual layout) is "block sd-encrypt lvm2 filesystems"
+#      (decrypt, then activate the VG inside); LUKS-on-LVM (rare) is
+#      "block lvm2 sd-encrypt filesystems" (VG first, then decrypt
+#      the LV). Only the hooks the layout needs are added, in place, in
+#      the existing HOOKS line — everything else is preserved.
+#  Why NOT Calamares' initcpiocfg module (option (a)): its real name is
+#      initcpiocfg, not initramfscfg; it REWRITES the whole HOOKS line
+#      from a hardcoded list on EVERY install (dropping "base" and
+#      reordering the known-good stock line even for plain installs, so
+#      the common path would NOT stay untouched); it appends the
+#      "lvm2" hook — which is the correct LVM hook, not a flaw; it picks
+#      the busybox "encrypt" hook unless useSystemdHook is configured; and — decisively — it touches
+#      nothing about the GRUB command line, so a LUKS root still could
+#      not unlock. It would fix at most half the bug while churning the
+#      common path. This function fixes both halves, only when needed.
+#  Scope: encrypted swap resume is NOT handled (no resume hook in the
+#  stock config, hibernation is not a Simorgh feature); a non-root
+#  encrypted partition (e.g. /home) needs nothing here — systemd unlocks
+#  it after boot from /etc/crypttab. Plain installs are left byte-for-
+#  byte untouched (verified by harness). A real LUKS install boot cannot
+#  be tested on this VM; the user's live retest remains the proof.
+#  The optional $1 is a fake root for testing (empty in production, so
+#  all paths are the real absolute ones). Never aborts the install:
+#  every failure warns loudly and the install continues, because a
+#  half-fixed system can be repaired from the live environment while
+#  an aborted install leaves nothing at all.
+configure_luks_boot() {
+  local root="${1:-}"
+  local fstab="$root/etc/fstab"
+  local crypttab="$root/etc/crypttab"
+  local mkconf="$root/etc/mkinitcpio.conf"
+  local grubdef="$root/etc/default/grub"
+
+  [[ -f "$fstab" ]] || { warn "No $fstab — cannot detect a LUKS/LVM root; leaving initramfs hooks untouched."; return 0; }
+
+  # Root device: field 1 of the "/" line. Calamares writes
+  # /dev/mapper/<name> for a LUKS root, /dev/<vg>/<lv> or
+  # /dev/mapper/<vg>-<lv> for an LVM root, UUID=<fs-uuid> otherwise.
+  local root_dev
+  root_dev="$(awk '$2 == "/" { print $1; exit }' "$fstab" 2>/dev/null || true)"
+  [[ -n "$root_dev" ]] || { warn "No root (/) entry in $fstab — leaving initramfs hooks untouched."; return 0; }
+
+  local have_blkid=0
+  if command -v blkid >/dev/null 2>&1; then have_blkid=1; fi
+
+  # Resolve UUID=/LABEL= specs to a /dev path when blkid is available.
+  local root_path="$root_dev"
+  if [[ "$root_dev" == UUID=* && "$have_blkid" -eq 1 ]]; then
+    root_path="$(blkid -U "${root_dev#UUID=}" 2>/dev/null || true)"
+    [[ -n "$root_path" ]] || root_path="$root_dev"
+  elif [[ "$root_dev" == LABEL=* && "$have_blkid" -eq 1 ]]; then
+    root_path="$(blkid -L "${root_dev#LABEL=}" 2>/dev/null || true)"
+    [[ -n "$root_path" ]] || root_path="$root_dev"
+  fi
+
+  # Encrypted /boot is unsupported by this fix (see header): warn early,
+  # whatever the root layout turns out to be.
+  local boot_dev
+  boot_dev="$(awk '$2 == "/boot" { print $1; exit }' "$fstab" 2>/dev/null || true)"
+  if [[ "$boot_dev" == /dev/mapper/* ]]; then
+    warn "/boot is on an encrypted device ($boot_dev); GRUB cannot read the kernel from LUKS without GRUB_ENABLE_CRYPTODISK=y (LUKS1 only) — not configured by this fix."
+  fi
+
+  # crypttab entries: name + LUKS UUID (Calamares writes "UUID=<luksUuid>").
+  local names=() uuids=()
+  if [[ -f "$crypttab" ]]; then
+    local crypt_lines=() line c_name c_dev
+    mapfile -t crypt_lines < <(grep -vE '^[[:space:]]*(#|$)' "$crypttab" 2>/dev/null || true)
+    for line in "${crypt_lines[@]}"; do
+      read -r c_name c_dev _c_rest <<< "$line" || true
+      [[ -z "$c_name" || "$c_dev" != UUID=* ]] && continue
+      names+=("$c_name")
+      uuids+=("${c_dev#UUID=}")
+    done
+  fi
+
+  local luks_name="" luks_uuid="" need_lvm=0 luks_on_lvm=0 root_is_luks=0
+  local i mapper_type container_dev
+  # LUKS containers holding an LVM PV (case 2) — every one of them,
+  # not just the first, so a root LV in any VG unlocks (I38-R3).
+  local -a pv_names=() pv_uuids=()
+
+  # Case 1: root itself is a LUKS mapper device.
+  for i in "${!names[@]}"; do
+    if [[ "$root_path" == "/dev/mapper/${names[$i]}" ]]; then
+      root_is_luks=1
+      luks_name="${names[$i]}"
+      luks_uuid="${uuids[$i]}"
+      break
+    fi
+  done
+  if [[ "$root_is_luks" -eq 1 ]]; then
+    if [[ "$have_blkid" -eq 1 ]]; then
+      # LVM inside the LUKS container? The decrypted device is then an LVM PV.
+      mapper_type="$(blkid -o value -s TYPE -- "/dev/mapper/$luks_name" 2>/dev/null || true)"
+      if [[ "$mapper_type" == "LVM2_member" ]]; then need_lvm=1; fi
+      # LUKS container sitting on an LV (LUKS-on-LVM)? The container
+      # device resolves to a /dev/mapper path, and the VG must be active
+      # before cryptsetup can open it.
+      container_dev="$(blkid -U "$luks_uuid" 2>/dev/null || true)"
+      if [[ "$container_dev" == /dev/mapper/* ]]; then
+        luks_on_lvm=1
+        need_lvm=1
+      fi
+    else
+      warn "blkid not found; cannot check whether LVM sits inside the LUKS container — assuming plain LUKS root."
+    fi
+  else
+    # Case 2: root is an LVM logical volume (/dev/<vg>/<lv> or
+    # /dev/mapper/<vg>-<lv>). A crypttab mapper name takes precedence
+    # (case 1 above), so a /dev/mapper/* root reaching here is either
+    # an LVM <vg>-<lv> name (hyphen form, handled below) or an
+    # unrecognised mapper — most likely an encrypted mapper with no
+    # matching crypttab entry, which must NOT be assumed to be LVM.
+    local root_base="${root_path#/dev/mapper/}"
+    if [[ "$root_path" == /dev/mapper/* && "$root_base" != *-* ]]; then
+      # Unrecognised mapper, no hyphen: warn loudly and leave hooks
+      # and cmdline untouched (safe failure, never abort). Via
+      # Calamares this is unproven — fstab always writes a UUID=
+      # crypttab entry for a LUKS root — so this is defense-in-depth
+      # against a non-Calamares / pre-existing crypttab state.
+      warn "Root looks like an encrypted mapper ($root_path) with no crypttab entry — leaving hooks untouched."
+      return 0
+    fi
+    # A hyphenated mapper name is ambiguous: a LUKS mapper name can
+    # contain a hyphen too (crypt-root), so the hyphen alone cannot
+    # prove LVM. Identify the device before assuming anything.
+    # NOTE: blkid TYPE on a mapper device reports the *decrypted
+    # content* (usually the filesystem), so in production it cannot
+    # tell a LUKS mapper from an LVM one — a real LUKS mapper reports
+    # ext4, not crypto_LUKS. The decisive check is the device-mapper
+    # type (lsblk TYPE: crypt vs lvm, both from util-linux/base);
+    # blkid is consulted first because it also answers LVM2_member
+    # for a mapper that is itself a PV.
+    if [[ "$root_path" == /dev/mapper/* ]]; then
+      local root_type=""
+      if [[ "$have_blkid" -eq 1 ]]; then
+        root_type="$(blkid -o value -s TYPE -- "$root_path" 2>/dev/null || true)"
+      fi
+      if [[ "$root_type" == "crypto_LUKS" ]]; then
+        warn "Root looks like an encrypted mapper ($root_path) with no crypttab entry — leaving hooks untouched."
+        return 0
+      fi
+      if [[ "$root_type" != "LVM2_member" ]]; then
+        local dm_type=""
+        if command -v lsblk >/dev/null 2>&1; then
+          dm_type="$(lsblk -no TYPE -- "$root_path" 2>/dev/null || true)"
+          dm_type="${dm_type//[[:space:]]/}"
+        fi
+        if [[ "$dm_type" == "crypt" ]]; then
+          warn "Root looks like an encrypted mapper ($root_path) with no crypttab entry — leaving hooks untouched."
+          return 0
+        elif [[ "$dm_type" != "lvm" ]]; then
+          warn "Cannot tell whether $root_path is LUKS or LVM — assuming LVM from the hyphenated mapper name."
+        fi
+      fi
+    fi
+    if [[ ( "$root_path" == /dev/*/* && "$root_path" != /dev/mapper/* ) || ( "$root_path" == /dev/mapper/* && "$root_base" == *-* ) ]]; then
+      need_lvm=1
+      # Is the VG's PV inside a LUKS container (LVM-on-LUKS)? The LUKS
+      # mapper device is then an LVM PV.
+      for i in "${!names[@]}"; do
+        if [[ "$have_blkid" -eq 1 ]]; then
+          mapper_type="$(blkid -o value -s TYPE -- "/dev/mapper/${names[$i]}" 2>/dev/null || true)"
+          if [[ "$mapper_type" == "LVM2_member" ]]; then
+            pv_names+=("${names[$i]}")
+            pv_uuids+=("${uuids[$i]}")
+          fi
+        fi
+      done
+      if [[ "${#pv_names[@]}" -ge 1 ]]; then
+        luks_name="${pv_names[0]}"
+        luks_uuid="${pv_uuids[0]}"
+      fi
+      if [[ -z "$luks_name" && "${#names[@]}" -eq 1 ]]; then
+        warn "blkid could not confirm which LUKS device holds the LVM volume group; assuming the only crypttab entry (${names[0]})."
+        luks_name="${names[0]}"
+        luks_uuid="${uuids[0]}"
+      elif [[ -z "$luks_name" && "${#names[@]}" -gt 1 ]]; then
+        warn "Root is an LVM volume and several LUKS devices exist, but blkid could not tell which one holds the volume group — adding lvm2 only, no LUKS kernel parameters."
+      fi
+    fi
+  fi
+
+  if [[ "$root_is_luks" -eq 0 && "$need_lvm" -eq 0 ]]; then
+    info "Root is not LUKS- or LVM-backed — leaving /etc/mkinitcpio.conf and GRUB untouched."
+    return 0
+  fi
+
+  # --- mkinitcpio HOOKS (before the kernel reinstall below) ---
+  local -a need_hooks=()
+  if [[ -n "$luks_name" ]]; then need_hooks+=(sd-encrypt); fi
+  if [[ "$need_lvm" -eq 1 ]]; then need_hooks+=(lvm2); fi
+  if [[ "$luks_on_lvm" -eq 1 ]]; then need_hooks=(lvm2 sd-encrypt); fi
+  if [[ "$need_lvm" -eq 1 && -n "$luks_name" && "$luks_on_lvm" -eq 0 ]]; then need_hooks=(sd-encrypt lvm2); fi
+
+  if [[ ! -f "$mkconf" ]]; then
+    warn "No $mkconf — cannot add initramfs hooks (${need_hooks[*]}); the installed system may not boot."
+  else
+    # Every uncommented HOOKS= line: bash uses the LAST one, so a
+    # duplicate would silently leave the edited (first) line
+    # ineffective. Update all of them (I38-R5). Leading whitespace
+    # is allowed (I39-R2): an indented HOOKS= line is still live.
+    local -a hook_linenos=()
+    mapfile -t hook_linenos < <(grep -nE '^[[:space:]]*HOOKS=\(' "$mkconf" | cut -d: -f1 || true)
+    if [[ "${#hook_linenos[@]}" -eq 0 ]]; then
+      warn "No uncommented HOOKS=(...) line in $mkconf — not editing initramfs hooks; the installed system may not boot."
+    else
+      if [[ "${#hook_linenos[@]}" -gt 1 ]]; then
+        warn "Multiple uncommented HOOKS=(...) lines in $mkconf (${#hook_linenos[@]}); bash uses the last one — updating all of them."
+      fi
+      # Back up once, before the first actual edit (cp -n: a re-run
+      # against an already-fixed tree must not create a stray .bak).
+      local backed_up=0
+      local lineno hooks_line hooks_inner hooks_tail hooks_rest hooks_before_comment new_line new_inner
+      local -a hooks=() to_add=() new_hooks=() new_tokens=()
+      local h m m_pos k j j_pos ins after block_idx fs_idx v_ok vh
+      for lineno in "${hook_linenos[@]}"; do
+        hooks_line="$(sed -n "${lineno}p" "$mkconf" || true)"
+        # Strip leading whitespace BEFORE the #HOOKS=( strip below
+        # (I39-R2): without this an indented line leaves "HOOKS=(base"
+        # as a hook token and the rewrite prepends a second HOOKS=(.
+        hooks_line="${hooks_line#"${hooks_line%%[![:space:]]*}"}"
+        # Trim trailing whitespace: a trailing space defeats the %)
+        # strip below and would rewrite the line with a doubled ')'
+        # (I38-R2).
+        hooks_line="${hooks_line%"${hooks_line##*[![:space:]]}"}"
+        # (I41-R1) Multi-line array: if the HOOKS=( line has no
+        # closing ')' before any trailing '#', the array continues
+        # onto the next line(s) — rewriting this one line alone
+        # would orphan the continuation lines and corrupt the
+        # file (dangling ')' = bash syntax error, yet rc 0). Refuse
+        # loudly and leave the file untouched (safe failure); do NOT
+        # try to rewrite a multi-line array in place. The check
+        # looks before the first '#' so a ')' inside a trailing
+        # comment cannot masquerade as the array close.
+        hooks_rest="${hooks_line#HOOKS=(}"
+        hooks_before_comment="${hooks_rest%%#*}"
+        if [[ "$hooks_before_comment" != *")"* ]]; then
+          warn "HOOKS=(...) in $mkconf spans multiple lines (line $lineno has no closing ')' on the same line) — leaving $mkconf untouched; hooks (${need_hooks[*]}) were NOT added. Put the HOOKS array on a single line and re-run."
+          continue
+        fi
+        # Split the array from any trailing comment (I41-R1): the
+        # hooks are the tokens up to the FIRST ')', everything after
+        # it is trailing text (usually a '# ...' comment) and is
+        # preserved verbatim on the rewrite. Without this, a line
+        # with no block/filesystems anchor appended the missing hook
+        # AFTER the comment text, i.e. inside the comment, where it
+        # did nothing. A hook is therefore never inserted into a
+        # trailing comment.
+        hooks_tail="${hooks_line#*)}"
+        hooks_inner="${hooks_rest%%)*}"
+        hooks=()
+        read -ra hooks <<< "$hooks_inner" || true
+        # Only the hooks this layout still lacks (idempotent on re-run).
+        to_add=()
+        for h in "${need_hooks[@]}"; do
+          [[ " ${hooks[*]} " == *" $h "* ]] || to_add+=("$h")
+        done
+        if [[ "${#to_add[@]}" -eq 0 ]]; then
+          info "mkinitcpio HOOKS (line $lineno) already contain ${need_hooks[*]} — leaving it untouched."
+          continue
+        fi
+        if [[ "$backed_up" -eq 0 ]]; then
+          cp -n "$mkconf" "$mkconf.simorgh-bak" 2>/dev/null || warn "Could not back up $mkconf; continuing without the backup."
+          backed_up=1
+        fi
+        # Insert each missing hook at its correct position in
+        # need_hooks order, relative to the hooks already present
+        # (I38-R1): before the first hook that comes AFTER it in
+        # need_hooks order, else after the last hook that comes
+        # BEFORE it, else after 'block', before 'filesystems', or
+        # at the end. Splicing the missing hooks as one block after
+        # 'block' reversed them when one was already present.
+        new_hooks=("${hooks[@]}")
+        for m in "${to_add[@]}"; do
+          m_pos=-1
+          for k in "${!need_hooks[@]}"; do
+            if [[ "${need_hooks[$k]}" == "$m" ]]; then m_pos="$k"; break; fi
+          done
+          ins=-1
+          for j in "${!new_hooks[@]}"; do
+            j_pos=-1
+            for k in "${!need_hooks[@]}"; do
+              if [[ "${need_hooks[$k]}" == "${new_hooks[$j]}" ]]; then j_pos="$k"; break; fi
+            done
+            if [[ "$j_pos" -gt "$m_pos" ]]; then ins="$j"; break; fi
+          done
+          if [[ "$ins" -ge 0 ]]; then
+            new_hooks=("${new_hooks[@]:0:$ins}" "$m" "${new_hooks[@]:$ins}")
+          else
+            after=-1
+            for j in "${!new_hooks[@]}"; do
+              j_pos=-1
+              for k in "${!need_hooks[@]}"; do
+                if [[ "${need_hooks[$k]}" == "${new_hooks[$j]}" ]]; then j_pos="$k"; break; fi
+              done
+              if [[ "$j_pos" -ge 0 && "$j_pos" -lt "$m_pos" ]]; then after="$j"; fi
+            done
+            if [[ "$after" -ge 0 ]]; then
+              new_hooks=("${new_hooks[@]:0:$((after+1))}" "$m" "${new_hooks[@]:$((after+1))}")
+            else
+              block_idx=-1; fs_idx=-1
+              for j in "${!new_hooks[@]}"; do
+                [[ "${new_hooks[$j]}" == "block" ]] && block_idx="$j"
+                [[ "${new_hooks[$j]}" == "filesystems" ]] && fs_idx="$j"
+              done
+              if [[ "$block_idx" -ge 0 ]]; then
+                new_hooks=("${new_hooks[@]:0:$((block_idx+1))}" "$m" "${new_hooks[@]:$((block_idx+1))}")
+              elif [[ "$fs_idx" -ge 0 ]]; then
+                new_hooks=("${new_hooks[@]:0:$fs_idx}" "$m" "${new_hooks[@]:$fs_idx}")
+              else
+                new_hooks+=("$m")
+              fi
+            fi
+          fi
+        done
+        # (I41-R1) Validate after the rewrite: the file must still
+        # parse (bash -n) and every needed hook must be present as
+        # a token INSIDE the array (before any '#'), not in a
+        # trailing comment. On failure restore the .bak taken above
+        # and warn loudly — never report success for a bad edit.
+        if sed -i "${lineno}s|.*|HOOKS=(${new_hooks[*]})${hooks_tail}|" "$mkconf"; then
+          new_line="$(sed -n "${lineno}p" "$mkconf" || true)"
+          new_line="${new_line#"${new_line%%[![:space:]]*}"}"
+          new_inner="${new_line#HOOKS=(}"
+          new_inner="${new_inner%%)*}"
+          new_tokens=()
+          read -ra new_tokens <<< "$new_inner" || true
+          v_ok=1
+          for vh in "${need_hooks[@]}"; do
+            [[ " ${new_tokens[*]} " == *" $vh "* ]] || v_ok=0
+          done
+          if bash -n "$mkconf" 2>/dev/null && [[ "$v_ok" -eq 1 ]]; then
+            info "mkinitcpio HOOKS now (line $lineno): HOOKS=(${new_hooks[*]})"
+          elif [[ -f "$mkconf.simorgh-bak" ]]; then
+            if cp -f "$mkconf.simorgh-bak" "$mkconf" 2>/dev/null; then
+              warn "HOOKS update in $mkconf (line $lineno) failed validation (file does not parse, or a needed hook is missing from the array) — restored $mkconf from the backup; hooks (${need_hooks[*]}) were NOT added."
+            else
+              warn "HOOKS update in $mkconf (line $lineno) failed validation and the backup could NOT be restored — check $mkconf by hand; hooks (${need_hooks[*]}) were NOT added."
+            fi
+          else
+            warn "HOOKS update in $mkconf (line $lineno) failed validation and no backup exists — check $mkconf by hand; hooks (${need_hooks[*]}) were NOT added."
+          fi
+        else
+          warn "Could not update HOOKS in $mkconf; the installed system may not boot."
+        fi
+      done
+    fi
+  fi
+
+  # --- GRUB kernel command line (LUKS only; LVM-only needs no cmdline) ---
+  if [[ -n "$luks_name" ]]; then
+    # Plain LUKS and LUKS-on-LVM: root is the decrypted mapper device.
+    # LVM-on-LUKS: root is the LV (fstab device, as resolved above).
+    local root_target="/dev/mapper/$luks_name"
+    if [[ "$need_lvm" -eq 1 && "$luks_on_lvm" -eq 0 ]]; then root_target="$root_path"; fi
+    # LUKS devices to unlock at boot: every container holding an LVM
+    # PV (case 2 — a root LV may live in any VG), else the single LUKS
+    # device (case 1 / single-entry assumption). Multiple
+    # rd.luks.name= parameters are allowed, one per container (I38-R3).
+    local -a unlock_names=() unlock_uuids=()
+    if [[ "${#pv_names[@]}" -gt 0 ]]; then
+      unlock_names=("${pv_names[@]}")
+      unlock_uuids=("${pv_uuids[@]}")
+    else
+      unlock_names=("$luks_name")
+      unlock_uuids=("$luks_uuid")
+    fi
+    if [[ ! -f "$grubdef" ]]; then
+      warn "No $grubdef — LUKS kernel parameters (rd.luks.name= for ${unlock_names[*]}) not set; the installed system may not boot."
+    else
+      local grub_changed=0
+      # Only the parameters not already present (idempotent on re-run).
+      local -a missing_params=()
+      local j
+      for j in "${!unlock_names[@]}"; do
+        if ! grep -Fq "rd.luks.name=${unlock_uuids[$j]}=${unlock_names[$j]}" "$grubdef"; then
+          missing_params+=("rd.luks.name=${unlock_uuids[$j]}=${unlock_names[$j]}")
+        fi
+      done
+      if [[ "${#missing_params[@]}" -eq 0 ]]; then
+        info "GRUB_CMDLINE_LINUX already contains the LUKS unlock parameters — leaving $grubdef untouched."
+      else
+        # root= travels with the parameters; it is already set if any
+        # rd.luks.name= is present from an earlier run.
+        if ! grep -Fq "rd.luks.name=" "$grubdef"; then
+          missing_params+=("root=$root_target")
+        fi
+        local params="${missing_params[*]}"
+        # Backup only when something will actually change (mirrors the
+        # mkinitcpio branch, which gates its cp -n on to_add): a re-run
+        # against an already-fixed tree must not create a stray .bak.
+        cp -n "$grubdef" "$grubdef.simorgh-bak" 2>/dev/null || warn "Could not back up $grubdef; continuing without the backup."
+        if grep -q '^[[:space:]]*GRUB_CMDLINE_LINUX=' "$grubdef"; then
+          # Rewrite the existing line in place, preserving its value,
+          # quoting style, and any trailing comment (I38-R4). Four
+          # forms, first match wins (sed applies them in order, and a
+          # rewritten line no longer matches the later ones):
+          #   1a. quoted value + trailing comment
+          #   1b. quoted value, no comment (double- or single-quoted)
+          #   2a. unquoted value + trailing comment
+          #   2b. unquoted value, no comment (re-emitted double-quoted)
+          sed -i -E \
+            -e "s|^[[:space:]]*GRUB_CMDLINE_LINUX=([\"'])(.*)\\1[[:space:]]*(#.*)\$|GRUB_CMDLINE_LINUX=\\1$params \\2\\1 \\3|" \
+            -e "s|^[[:space:]]*GRUB_CMDLINE_LINUX=([\"'])(.*)\\1[[:space:]]*\$|GRUB_CMDLINE_LINUX=\\1$params \\2\\1|" \
+            -e "s|^[[:space:]]*GRUB_CMDLINE_LINUX=([^\"'#[:space:]]([^#]*[^[:space:]#])?)[[:space:]]*(#.*)\$|GRUB_CMDLINE_LINUX=\"$params \\1\" \\3|" \
+            -e "s|^[[:space:]]*GRUB_CMDLINE_LINUX=([^\"'#[:space:]]([^#]*[^[:space:]#])?)[[:space:]]*\$|GRUB_CMDLINE_LINUX=\"$params \\1\"|" \
+            "$grubdef" || warn "Could not update GRUB_CMDLINE_LINUX in $grubdef; the installed system may not boot."
+          # If the line matched none of the four forms the sed changed
+          # nothing — fall back to appending a line (sourced last, so
+          # it wins), but warn that the old value is dropped by the
+          # shadowing. The sed inserts all of $params atomically, so
+          # checking the first missing parameter tells whether it ran.
+          local first_missing=""
+          for j in "${!missing_params[@]}"; do
+            if [[ "${missing_params[$j]}" == rd.luks.name=* ]]; then
+              first_missing="${missing_params[$j]}"
+              break
+            fi
+          done
+          if [[ -n "$first_missing" ]] && ! grep -Fq "$first_missing" "$grubdef"; then
+            warn "GRUB_CMDLINE_LINUX in $grubdef is not in a form this script can rewrite in place; appending a new line — its previous value is dropped."
+            printf 'GRUB_CMDLINE_LINUX="%s"\n' "$params" >> "$grubdef" || warn "Could not append GRUB_CMDLINE_LINUX to $grubdef; the installed system may not boot."
+          fi
+        else
+          # Defense-in-depth (I40-R1): the gate above matches a
+          # GRUB_CMDLINE_LINUX line at any indentation, but if one exists
+          # in some other unmatched form (e.g. spaces around '=', or an
+          # 'export' prefix) the append below would shadow it and drop
+          # its value silently — warn instead of dropping it quietly.
+          # The second grep excludes commented-out lines, whose value
+          # is not live.
+          if grep -E 'GRUB_CMDLINE_LINUX[[:space:]]*=' "$grubdef" | grep -qvE '^[[:space:]]*#'; then
+            warn "GRUB_CMDLINE_LINUX in $grubdef is not in a form this script can rewrite in place; appending a new line — its previous value is dropped."
+          fi
+          printf 'GRUB_CMDLINE_LINUX="%s"\n' "$params" >> "$grubdef" || warn "Could not append GRUB_CMDLINE_LINUX to $grubdef; the installed system may not boot."
+        fi
+        # Verify every unlock parameter is now present.
+        local -a still_missing=()
+        for j in "${!unlock_names[@]}"; do
+          if ! grep -Fq "rd.luks.name=${unlock_uuids[$j]}=${unlock_names[$j]}" "$grubdef"; then
+            still_missing+=("${unlock_names[$j]}")
+          fi
+        done
+        if [[ "${#still_missing[@]}" -eq 0 ]]; then
+          grub_changed=1
+          info "GRUB_CMDLINE_LINUX now unlocks LUKS ($params)."
+        fi
+      fi
+      # The bootloader step already ran, so regenerate grub.cfg here —
+      # nobody else will pick up the new parameters. Skipped on a
+      # re-run where the parameters were already present (idempotency).
+      if [[ "$grub_changed" -eq 1 ]]; then
+      if [[ -d "$root/boot/grub" ]]; then
+        if command -v grub-mkconfig >/dev/null 2>&1; then
+          grub-mkconfig -o "$root/boot/grub/grub.cfg" || warn "grub-mkconfig failed; /boot/grub/grub.cfg still lacks the LUKS kernel parameters — the installed system may not boot."
+        else
+          warn "grub-mkconfig not found; /boot/grub/grub.cfg still lacks the LUKS kernel parameters — the installed system may not boot."
+        fi
+      else
+        warn "No $root/boot/grub — GRUB config not regenerated; the LUKS kernel parameters are in $grubdef but not in any grub.cfg yet."
+      fi
+      fi
+    fi
+  fi
+  return 0
+}
+configure_luks_boot
+
 # The live image's mkinitcpio drop-in (archiso-only HOOKS, no autodetect)
 # leaked into the target via unpackfs; drop it (the keyring step already
 # removed it before the packages step — this is the belt-and-braces copy)
 # and regenerate the initramfs natively by reinstalling the kernel: the
-# linux package's install hook runs mkinitcpio with the stock config.
+# linux package's install hook runs mkinitcpio with the config —
+# stock, or LUKS/LVM-adjusted by configure_luks_boot above.
 # Do NOT replace this with a manual mkinitcpio rebuild here instead —
 # that was tried before and does not regenerate reliably (round-4 audit). Do NOT add --needed below:
 # without it pacman reinstalls the same-version kernel and fires the

@@ -23,8 +23,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --reconfigure) RECONFIGURE=1; shift ;;
     --chroot) CHROOT_MODE=1; shift ;;
-    --user) TARGET_USER="${2:-}"; shift 2 ;;
-    --locale) LOCALE_OVERRIDE="${2:-}"; shift 2 ;;
+    --user) [[ $# -ge 2 ]] || { echo "--user needs a value" >&2; exit 1; }; TARGET_USER="$2"; shift 2 ;;
+    --locale) [[ $# -ge 2 ]] || { echo "--locale needs a value" >&2; exit 1; }; LOCALE_OVERRIDE="$2"; shift 2 ;;
     --help|-h)
       cat <<'EOF'
 Usage: ./install.sh [--reconfigure] [--help]
@@ -278,7 +278,15 @@ if ! command -v yay >/dev/null; then
   # makepkg -si exiting 0 does not by itself prove the yay command
   # works — verify before trusting it, or a half-installed yay would
   # claim success here and skip the release-binary fallback below.
-  if [[ $yay_ok -eq 1 ]] && ! yay --version >/dev/null 2>&1; then
+  # yay refuses to run as root ("Avoid running yay as root/sudo.", rc 1),
+  # and --chroot mode runs as root — so verify as the target user there,
+  # with the same runuser/env pattern the build step above uses.
+  if [[ $CHROOT_MODE -eq 1 ]]; then
+    yay_check=(runuser -u "$TARGET_USER" -- env HOME="$HOME" USER="$TARGET_USER" LOGNAME="$TARGET_USER" yay --version)
+  else
+    yay_check=(yay --version)
+  fi
+  if [[ $yay_ok -eq 1 ]] && ! "${yay_check[@]}" >/dev/null 2>&1; then
     warn "yay built but 'yay --version' fails; trying the yay release binary..."
     yay_ok=0
   fi
@@ -290,7 +298,14 @@ if ! command -v yay >/dev/null; then
     # the official release and smoke-tested with yay --version after
     # installing; an unverified (or failing-smoke-test) download is
     # never installed.
-    if [[ "$(uname -m)" == "x86_64" ]] && (cd "$tmp" && curl -fsSL -o yay.tar.gz https://github.com/Jguer/yay/releases/download/v13.1.0/yay_13.1.0_x86_64.tar.gz && tar -xzf yay.tar.gz && $SUDO install -m 755 yay_13.1.0_x86_64/yay /usr/local/bin/yay && /usr/local/bin/yay --version >/dev/null); then
+    # Same root refusal as the post-build check above: smoke-test the
+    # release binary as the target user in chroot mode.
+    if [[ $CHROOT_MODE -eq 1 ]]; then
+      yay_smoke=(runuser -u "$TARGET_USER" -- env HOME="$HOME" USER="$TARGET_USER" LOGNAME="$TARGET_USER" /usr/local/bin/yay --version)
+    else
+      yay_smoke=(/usr/local/bin/yay --version)
+    fi
+    if [[ "$(uname -m)" == "x86_64" ]] && (cd "$tmp" && curl -fsSL -o yay.tar.gz https://github.com/Jguer/yay/releases/download/v13.1.0/yay_13.1.0_x86_64.tar.gz && tar -xzf yay.tar.gz && $SUDO install -m 755 yay_13.1.0_x86_64/yay /usr/local/bin/yay && "${yay_smoke[@]}" >/dev/null); then
       yay_ok=1
     else
       warn "yay release binary failed (download, extract, or smoke test)."
@@ -703,13 +718,24 @@ deploy_config() { # deploy_config <name>
   # active.lua / current / wallpaper.png / hyprpaper.conf /
   # hyprlock.conf (background path) in hypr, theme.css in waybar,
   # theme.rasi in rofi, theme.conf in kitty, style.css in swaync.
+  # NOTE: `diff -x` matches by BASENAME at any depth, so a blanket
+  # `-x style.css` also excluded waybar/style.css — a static
+  # stylesheet simorgh-theme never writes — and repo updates to it
+  # silently never deployed on re-runs. deploy_config runs once per
+  # top-level config, so the style.css exclusion applies only when
+  # deploying swaync, the one config where it is theme-managed.
   # (Residual: repo updates to hyprlock.conf / hyprpaper.conf outside
   # the theme-managed lines won't deploy either — the theme rewrites
   # those files wholesale, so they are seeds, not live configs.)
-  if diff -r -q \
-      -x active.lua -x current -x wallpaper.png \
-      -x hyprpaper.conf -x hyprlock.conf \
-      -x theme.css -x theme.rasi -x theme.conf -x style.css \
+  local -a diff_excludes=(
+    -x active.lua -x current -x wallpaper.png
+    -x hyprpaper.conf -x hyprlock.conf
+    -x theme.css -x theme.rasi -x theme.conf
+  )
+  if [[ "$name" == "swaync" ]]; then
+    diff_excludes+=( -x style.css )
+  fi
+  if diff -r -q "${diff_excludes[@]}" \
       "$src" "$dst" >/dev/null 2>&1; then
     # Byte-identical (ignoring theme-managed files): nothing to deploy.
     return 0
@@ -744,7 +770,7 @@ if [[ -f "$REPO_DIR/config/profile" ]]; then
   if [[ -L "$HOME/.profile" ]]; then
     # A symlink (e.g. dotfiles-managed) must not be copied through:
     # plain `cp` would clobber the file the link points at. Leave the
-    # link alone — /etc/profile.d/simorgh.sh above already puts
+    # link alone — /etc/profile.d/simorgh.sh below already puts
     # ~/.local/bin on the session PATH.
     warn "~/.profile is a symlink to $(readlink "$HOME/.profile") — leaving it alone; add the PATH line from $REPO_DIR/config/profile there yourself if you want it."
   else
@@ -846,7 +872,7 @@ fi
 if [[ $CHROOT_MODE -eq 1 ]]; then
   info "Setting zsh as the default shell for $TARGET_USER..."
   chsh -s /usr/bin/zsh "$TARGET_USER" || warn "Could not change the default shell automatically."
-elif [[ "$SHELL" != */zsh ]]; then
+elif [[ "${SHELL:-}" != */zsh ]]; then
   info "Setting zsh as the default shell..."
   chsh -s /usr/bin/zsh || warn "Could not change the default shell automatically. Run: chsh -s /usr/bin/zsh"
 fi

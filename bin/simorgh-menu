@@ -94,7 +94,7 @@ pick_and_install() { # pick_and_install <prompt> <"Label|pkg ..." ...>
   for i in "${!labels[@]}"; do
     if [[ "${labels[$i]}" == "$choice" ]]; then
       pkg="${pkgs[$i]}"
-      [[ "$pkg" == "-" ]] && return 0
+      [[ "$pkg" == "-" ]] && { notify "$choice is already installed."; return 0; }
       # shellcheck disable=SC2086
       run_in_terminal $pkg
       if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then notify "Installing $choice..."; fi
@@ -195,6 +195,24 @@ install_sung() {
 
 install_soundcloud() {
   # No official SoundCloud Linux app: add it as a Chromium web app.
+  # Without Chromium the launcher below would be dead, so check first
+  # and offer the install (same run_in_terminal pattern as the browser
+  # menu) instead of writing it with a success notify.
+  if ! command -v chromium >/dev/null; then
+    local choice
+    choice="$(rofi_menu "Chromium is not installed" \
+      "Install Chromium" \
+      "Cancel")" || return 0
+    if [[ "$choice" == "Install Chromium" ]]; then
+      run_in_terminal chromium
+      if [[ "${INSTALL_STARTED:-0}" -eq 1 ]]; then
+        notify "Installing Chromium — add the SoundCloud web app again once it finishes."
+      fi
+    else
+      notify "SoundCloud web app needs Chromium — install it first (Install Browser → Chromium)."
+    fi
+    return 0
+  fi
   # Both writes are essential to the "added" notify below — a failure
   # must say so instead of aborting silently under `set -e`.
   mkdir -p "$HOME/.local/share/applications" || {

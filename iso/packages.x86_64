@@ -23,6 +23,7 @@ efibootmgr
 # dual-boot; ntfs-3g is what lets os-prober read Windows partitions.
 os-prober
 ntfs-3g
+ntfsprogs
 memtest86+
 memtest86+-efi
 edk2-shell
@@ -59,6 +60,9 @@ cryptsetup
 lvm2
 jq
 python
+# lua: simorgh-live-setup.sh syntax-checks the assembled live
+# hyprland.lua with `luac -p`; without it the check can never run.
+lua
 
 # Graphical installer
 calamares

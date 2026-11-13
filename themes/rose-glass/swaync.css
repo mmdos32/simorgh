@@ -56,6 +56,10 @@
     padding: 4px 10px;
 }
 
+.widget-notifications {
+    background: transparent;
+}
+
 .widget-dnd {
     color: #e6edf3;
     background: transparent;

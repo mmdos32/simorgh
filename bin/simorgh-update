@@ -50,7 +50,7 @@ remote="$(git -C "$REPO" remote get-url origin 2>/dev/null || true)"
 # the error message shows the real origin.
 remote_norm="${remote,,}"
 while [[ "$remote_norm" == */ ]]; do remote_norm="${remote_norm%/}"; done
-if [[ -n "$remote_norm" && ! "$remote_norm" =~ (^|[@/])github\.com[:/]mmdos32/simorgh(\.git)?$ ]]; then
+if [[ -n "$remote_norm" && ! "$remote_norm" =~ ^((https?|ssh)://([^@/]+@)?|git@)?github\.com[:/]mmdos32/simorgh(\.git)?$ ]]; then
   echo "simorgh-update: $REPO is not the Simorgh repo (origin: $remote)." >&2
   echo "Set SIMORGH_REPO to the right clone and try again." >&2
   exit 1
@@ -211,4 +211,4 @@ EOF
 # flat form would survive every update.
 heal_hyprpaper_conf
 
-exec "$REPO/install.sh"
+exec "$REPO/install.sh" "$@"

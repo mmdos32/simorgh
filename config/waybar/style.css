@@ -26,7 +26,7 @@ window#waybar {
 
 #workspaces button.active {
     background: @accent;
-    color: #0d1418;
+    color: @on-accent;
 }
 
 #workspaces button:hover {
@@ -52,7 +52,10 @@ window#waybar {
 }
 
 #clock {
-    color: @accent;
+    /* @text, not @accent: the accent is sub-AA on rose/violet on
+       @module-bg (rose min 4.31, violet 4.38); @text clears AA/AAA
+       on every theme. Accent stays on the active workspace button. */
+    color: @text;
     font-weight: bold;
 }
 
@@ -61,15 +64,19 @@ window#waybar {
 }
 
 #battery.critical {
-    color: #f87171;
+    /* Light red, not #f87171: the composited module background is
+       dark (luminance ~0.03-0.05), so a darker red lowers contrast
+       (#ef4444: forest network min 2.94); #fca5a5 clears AA. */
+    color: #fca5a5;
 }
 
 #network.disconnected {
-    color: #f87171;
+    color: #fca5a5;
 }
 
 #pulseaudio.muted {
-    color: #8b9aa5;
+    /* Same established muted-grey fix as SwayNC .time. */
+    color: #b0bec8;
 }
 
 tooltip {

@@ -4,7 +4,7 @@
  * sit on the light main pane from stylesheet.qss, so dark text is
  * required (the default QML text color would be unreadable on a
  * dark background, and vice versa). The logo sits on a dark chip
- * (sidebar color #0d1418): the pale phoenix is low-contrast
+ * (dark chip #0d1418): the pale phoenix is low-contrast
  * straight on the light pane.
  */
 
